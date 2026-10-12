@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="assets/logo.svg" width="92" alt="ArrangeOMatic logo">
+  <img src="assets/logo.svg" width="92" alt="Arrange-o-Matic logo">
 </div>
 
-# ArrangeOMatic
+# Arrange-o-Matic
 
 *Packs and clusters your bag items into tidy grid blocks — bags, bank and guild bank, laid out the way your bag windows actually look.*
 
@@ -16,7 +16,7 @@
 
 ---
 
-ArrangeOMatic is a lightweight organizer addon for the Wrath of the Lich King client. It draws the usable slots of your containers as grids — one per bag window with the stock Blizzard UI, or one combined grid if you use a single-window bag addon — and re-packs your items into compact blocks: several stacks of the same item stay together, single items are grouped by category, and free space is pushed out of the way: towards the bottom of each window and, in the stock UI, into your first bags — right where your newest loot tends to pile up.
+Arrange-o-Matic is a lightweight organizer addon for the Wrath of the Lich King client. It draws the usable slots of your containers as grids — one per bag window with the stock Blizzard UI, or one combined grid if you use a single-window bag addon — and re-packs your items into compact blocks: several stacks of the same item stay together, single items are grouped by category, and free space is pushed out of the way: towards the bottom of each window and, in the stock UI, into your first bags — right where your newest loot tends to pile up.
 
 > [!NOTE]
 > Built for the 3.3.5a client (Interface 30300). It uses only the standard Blizzard item APIs — a single Lua file, no libraries, no dependencies.
@@ -71,9 +71,9 @@ Example session (with the default `ui` setting):
 
 ```text
 /aom
-ArrangeOMatic: bags: 80 slots, 5 bag windows, 21 clusters, 36 moves (4 stack merges)...
-ArrangeOMatic: 25/36 moves
-ArrangeOMatic: done.
+Arrange-o-Matic: bags: 80 slots, 5 bag windows, 21 clusters, 36 moves (4 stack merges)...
+Arrange-o-Matic: 25/36 moves
+Arrange-o-Matic: done.
 ```
 
 (In `ui single` the same line reports the combined grid instead, e.g. `bags: 80 slots, 10 columns, ...`.) The figure in parentheses is how many partial stacks it will merge first; with `/aom pack off` it reads `(0 stack merges)`.

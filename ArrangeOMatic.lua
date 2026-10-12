@@ -99,7 +99,7 @@ local frame = CreateFrame("Frame")
 local job
 
 local function Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99ArrangeOMatic:|r " .. msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99Arrange-o-Matic:|r " .. msg)
 end
 
 local function GetColumns()

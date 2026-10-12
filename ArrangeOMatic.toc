@@ -1,5 +1,5 @@
 ## Interface: 30300
-## Title: Arrange-O-Matic
+## Title: Arrange-o-Matic
 ## Notes: Packs and clusters your bag items on an N-column grid, anchored at the last slot. Use /arrangeomatic.
 ## Version: 1.2
 ## SavedVariables: ArrangeOMaticDB
