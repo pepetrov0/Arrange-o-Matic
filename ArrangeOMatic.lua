@@ -98,8 +98,19 @@ local TIMEOUT = 8          -- seconds to wait for the server before giving up
 local frame = CreateFrame("Frame")
 local job
 
+local TAG = "|cff33ff99Arrange-o-Matic|r"
+local ADDON_VERSION = GetAddOnMetadata("ArrangeOMatic", "Version") or "?"
+
+local function Log(msg)
+    DEFAULT_CHAT_FRAME:AddMessage(TAG .. " " .. msg)
+end
+
 local function Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99Arrange-o-Matic:|r " .. msg)
+    Log(msg)
+end
+
+local function LogLoad(hint)
+    Log("v" .. ADDON_VERSION .. " loaded." .. (hint and (" " .. hint) or ""))
 end
 
 local function GetColumns()
@@ -933,6 +944,7 @@ frame:SetScript("OnEvent", function(self, event, name)
             if ArrangeOMaticDB.subtypes == nil then ArrangeOMaticDB.subtypes = true end
             if ArrangeOMaticDB.pack == nil then ArrangeOMaticDB.pack = true end
             if ArrangeOMaticDB.ui ~= "single" then ArrangeOMaticDB.ui = "default" end
+            LogLoad(nil)
         end
     elseif event == "BANKFRAME_OPENED" then bankOpen = true
     elseif event == "BANKFRAME_CLOSED" then bankOpen = false

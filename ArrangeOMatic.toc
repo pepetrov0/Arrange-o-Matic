@@ -1,7 +1,8 @@
 ## Interface: 30300
 ## Title: Arrange-o-Matic
+## Author: Petar Petrov
 ## Notes: Packs and clusters your bag items on an N-column grid, anchored at the last slot. Use /arrangeomatic.
-## Version: 1.2
+## Version: 1.2.1
 ## SavedVariables: ArrangeOMaticDB
 
 ArrangeOMatic.lua
