@@ -12,6 +12,7 @@ ArrangeOMatic - WotLK 3.3.5a
   /aom groups subtype   group single items by type AND subtype (default)
   /aom groups type      group single items by broad type only
   /aom pack on|off      combine partial stacks of the same item first (default on)
+  /aom trash on|off     gather grey items at the far end of your bags (default on)
   /aom stop             cancel a running arrangement
   (long form: /arrangeomatic)
 
@@ -48,6 +49,11 @@ Model
   * When sorting your bags the Hearthstone is always pinned to the first cell of
     the top row of the first window to be filled: the last slot of all bags in
     single mode, the top-left of the LAST bag in default mode.
+  * Trash (bags only, /aom trash): grey items are taken out of the clusters and
+    put in one unbroken run of slots at the opposite end from the Hearthstone -
+    the very last cell in fill order, then backwards from there: slot 1 onwards
+    in single mode, the bottom-right of the backpack leftwards and upwards in
+    default mode (spilling into bag 1 if the backpack runs out).
   * The guild bank window is 14 columns x 7 rows, numbered column by column, so
     for /aom gbank the grid "width" is fixed at 7 (one model row = one window
     column, drawn transposed, which keeps clusters square in the window). The
@@ -177,7 +183,12 @@ local function Describe(api, slot)
     local link = api.link(slot)
     if not link then return nil end
     local count = api.info(slot)
+    -- Poor (grey) quality; the link's colour code is the fallback if the item
+    -- info isn't cached yet.
+    local quality = select(3, GetItemInfo(link))
+    local trash = (quality == 0) or (quality == nil and link:find("|cff9d9d9d", 1, true) ~= nil)
     return {
+        trash = trash,
         id    = tonumber(link:match("item:(%d+)")),
         cat   = GetCategory(link),
         sig   = MakeSig(link, count),
@@ -276,7 +287,7 @@ local function BuildClusters(items, S, skip)
     local byId = {}
     for v = 1, S do
         local it = items[v]
-        if it and v ~= skip then
+        if it and not skip[v] then
             local l = byId[it.id]
             if not l then l = {}; byId[it.id] = l end
             l[#l + 1] = v
@@ -415,9 +426,14 @@ end
 local function LayoutOnce(clusters, lo, hi, N, reserved, WASTE_WEIGHT, mirror)
     local stats = { pure = 0, flood = 0 }
     local rows = hi / N
+    -- reserved = { cells = {[P] = true}, rows = n }: cells taken before any
+    -- cluster (Hearthstone, trash), and how many top rows count as already used.
     local owner = {}
     local usedRows = 0
-    if reserved then owner[reserved] = true; usedRows = 1 end
+    if reserved then
+        for p in pairs(reserved.cells) do owner[p] = true end
+        usedRows = reserved.rows
+    end
     local cellsOf = {}
 
     for ci, c in ipairs(clusters) do
@@ -659,10 +675,10 @@ local function BuildMerges(items, S)
                 postA = postA, postB = postB,
             }
 
-            items[dest.v] = { id = dIt.id, cat = dIt.cat, base = dIt.base,
+            items[dest.v] = { id = dIt.id, cat = dIt.cat, base = dIt.base, trash = dIt.trash,
                               count = dest.n, stack = dIt.stack, sig = postB }
             if src.n > 0 then
-                items[src.v] = { id = sIt.id, cat = sIt.cat, base = sIt.base,
+                items[src.v] = { id = sIt.id, cat = sIt.cat, base = sIt.base, trash = sIt.trash,
                                  count = src.n, stack = sIt.stack, sig = postA }
             else
                 items[src.v] = nil
@@ -675,10 +691,27 @@ local function BuildMerges(items, S)
     return moves
 end
 
+-- Give `members` (slot indices) the slots in `targets`: members already on a
+-- target stay put, the rest fill the remaining targets in order.
+local function Assign(dest, members, targets)
+    local isCell, movers = {}, {}
+    for _, v in ipairs(targets) do isCell[v] = true end
+    for _, m in ipairs(members) do
+        if isCell[m] then dest[m] = m; isCell[m] = nil
+        else movers[#movers + 1] = m end
+    end
+    local i = 1
+    for _, v in ipairs(targets) do
+        if isCell[v] then dest[movers[i]] = v; i = i + 1 end
+    end
+end
+
 -- Returns an ordered list of swaps {a, b, preA, preB, postA, postB} (slot indices).
 -- `layout` is a list of grids (see SingleWindowLayout / SeparateWindowsLayout),
 -- or just a column count, meaning one combined window of that width.
-local function BuildMoves(S, items, layout, pinHearthstone)
+-- sinkTrash: grey items go, as one run of consecutive cells, to the very end of
+-- the fill order - the opposite end from the Hearthstone.
+local function BuildMoves(S, items, layout, pinHearthstone, sinkTrash)
     if type(layout) == "number" then layout = SingleWindowLayout(S, layout) end
 
     -- Per-window geometry. P is the padded grid index described above GrowRegion,
@@ -695,6 +728,7 @@ local function BuildMoves(S, items, layout, pinHearthstone)
         grids[gi] = {
             cols = l.cols, size = size, off = off, parts = {}, mirror = l.mirror, main = l.main,
             free = size,                                  -- capacity left for clusters
+            reserved = { cells = {}, rows = 0 },
             toV  = l.flip and function(P) return first + size + off - 1 - P end
                           or  function(P) return first + P - off end,
         }
@@ -712,11 +746,39 @@ local function BuildMoves(S, items, layout, pinHearthstone)
             local pg = grids[1]   -- the window filled first (the last bag when fillFromEnd)
             pinV = pg.toV(pg.off)
             pg.free = pg.free - 1
-            pg.reserved = pg.off
+            pg.reserved.cells[pg.off] = true
+            pg.reserved.rows = 1
         end
     end
 
-    local clusters = BuildClusters(items, S, hsV)
+    -- Trash takes the last cells in fill order: the last cell of the last window
+    -- filled, then backwards from there (spilling into the previous window if it
+    -- has to), so it is one unbroken run of slots.
+    local skip, trash, trashCells = {}, {}, {}
+    if hsV then skip[hsV] = true end
+    if sinkTrash then
+        for v = 1, S do
+            if items[v] and items[v].trash and not skip[v] then
+                trash[#trash + 1] = v
+                skip[v] = true
+            end
+        end
+        local need = #trash
+        for gi = #grids, 1, -1 do
+            local g = grids[gi]
+            for P = g.size + g.off - 1, g.off, -1 do
+                if need == 0 then break end
+                if not g.reserved.cells[P] then
+                    g.reserved.cells[P] = true
+                    g.free = g.free - 1
+                    trashCells[#trashCells + 1] = g.toV(P)
+                    need = need - 1
+                end
+            end
+        end
+    end
+
+    local clusters = BuildClusters(items, S, skip)
     DistributeClusters(clusters, grids, gridOf)
 
     local stats = { pure = 0, flood = 0 }
@@ -738,23 +800,12 @@ local function BuildMoves(S, items, layout, pinHearthstone)
     -- Assign items to cells; anything already inside its cluster's area stays.
     for _, g in ipairs(grids) do
         for _, part in ipairs(g.parts) do
-            local toV = part.toV
-            local isCell = {}
-            for _, P in ipairs(part.cells) do isCell[toV(P)] = true end
-
-            local movers = {}
-            for _, m in ipairs(part.members) do
-                if isCell[m] then dest[m] = m; isCell[m] = nil
-                else movers[#movers + 1] = m end
-            end
-            local free = {}
-            for _, P in ipairs(part.cells) do
-                local v = toV(P)
-                if isCell[v] then free[#free + 1] = v end
-            end
-            for i, m in ipairs(movers) do dest[m] = free[i] end
+            local targets = {}
+            for i, P in ipairs(part.cells) do targets[i] = part.toV(P) end
+            Assign(dest, part.members, targets)
         end
     end
+    Assign(dest, trash, trashCells)
     if hsV then dest[hsV] = pinV end
     for tok, d in pairs(dest) do want[d] = tok end
 
@@ -910,7 +961,8 @@ local function Start(mode)
         merges = BuildMerges(items, S)
     end
 
-    local moves, nClusters, stats = BuildMoves(S, items, layout, pin)
+    local sinkTrash = pin and ArrangeOMaticDB and ArrangeOMaticDB.trash ~= false
+    local moves, nClusters, stats = BuildMoves(S, items, layout, pin, sinkTrash)
     local split = stats.pure + stats.flood
     if split > 0 then
         Print(string.format("note: not enough free room to keep %d cluster(s) as solid blocks.", split))
@@ -943,6 +995,7 @@ frame:SetScript("OnEvent", function(self, event, name)
             ArrangeOMaticDB.columns = tonumber(ArrangeOMaticDB.columns) or DEFAULT_COLUMNS
             if ArrangeOMaticDB.subtypes == nil then ArrangeOMaticDB.subtypes = true end
             if ArrangeOMaticDB.pack == nil then ArrangeOMaticDB.pack = true end
+            if ArrangeOMaticDB.trash == nil then ArrangeOMaticDB.trash = true end
             if ArrangeOMaticDB.ui ~= "single" then ArrangeOMaticDB.ui = "default" end
             LogLoad(nil)
         end
@@ -1008,9 +1061,19 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
         else
             Print("pack = " .. (ArrangeOMaticDB.pack == false and "off" or "on") .. "  (use /aom pack on|off)")
         end
+    elseif cmd == "trash" or cmd == "junk" or cmd == "grey" or cmd == "gray" then
+        if arg == "on" or arg == "1" or arg == "yes" then
+            ArrangeOMaticDB.trash = true
+            Print("trash = on: grey items are gathered at the far end of your bags.")
+        elseif arg == "off" or arg == "0" or arg == "no" then
+            ArrangeOMaticDB.trash = false
+            Print("trash = off: grey items are grouped like any other item.")
+        else
+            Print("trash = " .. (ArrangeOMaticDB.trash == false and "off" or "on") .. "  (use /aom trash on|off)")
+        end
     elseif cmd == "stop" then
         if job then Abort("cancelled.") else Print("nothing running.") end
     else
-        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom stop")
+        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom stop")
     end
 end

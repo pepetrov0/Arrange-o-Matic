@@ -7,7 +7,7 @@
 *Packs and clusters your bag items into tidy grid blocks — bags, bank and guild bank, laid out the way your bag windows actually look.*
 
 ![World of Warcraft WotLK 3.3.5a](https://img.shields.io/static/v1?style=flat-square&label=WoW&message=WotLK%203.3.5a&color=a335ee)
-![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.2.1&color=2ea043)
+![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.3.0&color=2ea043)
 ![Lua 5.1](https://img.shields.io/static/v1?style=flat-square&label=Lua&message=5.1&color=000080)
 
 ⭐ If you find this addon useful, star it on GitHub — it helps others discover it!
@@ -31,8 +31,9 @@ Arrange-o-Matic is a lightweight organizer addon for the Wrath of the Lich King 
 - **Bags, bank and guild bank** – the backpack, all bag slots, the bank (including bank bags) and any guild bank tab you can open. Specialized bags (quivers, herb bags, ammo pouches…) and the keyring are left untouched.
 - **Smart clusters** – items occupying several slots (e.g. 8× Dreaming Glory) form one block; remaining single-stack items are grouped by type/subtype, or by broad type only — your choice.
 - **Hearthstone pinned** – when arranging your bags, the Hearthstone always ends up in the first cell of the top row of the first window being filled: the top-left of your last bag with the default UI, the left end of the combined grid with a single-window bag addon.
+- **Trash at the far end** – when arranging your bags, grey (poor-quality) items are pulled out of their groups and packed into one unbroken run of slots at the opposite end from the Hearthstone: the bottom-right of the backpack, running leftwards and upwards (spilling into bag 1 if needed) with the default UI, or slot 1 onwards — the bottom-right of the combined grid — with a single-window bag addon. Easy to find at a vendor. `/aom trash off` turns it off (on by default).
 - **Safe execution** – every move, arrangement move or stack merge alike, is verified before and after; the run aborts cleanly if something changes mid-sort instead of shuffling items around. Cancel any time with `/aom stop`.
-- **Saved settings** – window mode, grid width, grouping and stack-packing settings are stored per account.
+- **Saved settings** – window mode, grid width, grouping, stack-packing and trash settings are stored per account.
 
 ## Installation
 
@@ -65,6 +66,7 @@ Type in any chat input:
 | `/aom groups subtype` | Group single items by type and subtype (default) |
 | `/aom groups type` | Group single items by broad type only |
 | `/aom pack on\|off` | Stack packing: combine partial stacks of the same item before arranging (default on) — `/aom pack` alone shows the current setting |
+| `/aom trash on\|off` | Gather grey items at the far end of your bags, opposite the Hearthstone (default on) — `/aom trash` alone shows the current setting |
 | `/aom stop` | Cancel an arrangement in progress |
 
 Example session (with the default `ui` setting):
