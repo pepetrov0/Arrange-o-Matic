@@ -13,6 +13,8 @@ ArrangeOMatic - WotLK 3.3.5a
   /aom groups type      group single items by broad type only
   /aom pack on|off      combine partial stacks of the same item first (default on)
   /aom trash on|off     gather grey items at the far end of your bags (default on)
+  /aom auto on|off      arrange your bags by itself when you are idle (default off)
+  /aom delay <seconds>  how long you must be idle before auto mode arranges (default 5)
   /aom stop             cancel a running arrangement
   (long form: /arrangeomatic)
 
@@ -104,6 +106,14 @@ local EPS           = 1e-6
 -- Execution tuning
 local TICK    = 0.05       -- seconds between steps
 local TIMEOUT = 8          -- seconds to wait for the server before giving up
+
+-- Auto mode (/aom auto): after the bags change, wait until the player has been
+-- idle (no combat, looting, vendor/bank/mail/trade window, casting, item on the
+-- cursor...) for the delay (/aom delay, default AUTO_DELAY seconds), then
+-- arrange the bags silently.
+local AUTO_DELAY     = 5
+local MAX_AUTO_DELAY = 60
+local AUTO_POLL  = 0.5
 
 local frame = CreateFrame("Frame")
 local job
@@ -856,14 +866,33 @@ ArrangeOMatic = { BuildMoves = BuildMoves, BuildMerges = BuildMerges, weights = 
 -- Execution
 ---------------------------------------------------------------------------
 
+-- Auto-arrange state: dirty = the bags changed since the last arrangement;
+-- lastBusy = the last time the player was doing something (or the bags changed).
+local autoDirty, lastBusy, lootOpen = false, 0, false
+
+local function Shown(f) return f and f:IsShown() end
+
+-- Is the player doing something an arrangement would get in the way of?
+-- ignoreCursor: the executor itself puts items on the cursor while it runs.
+local function PlayerBusy(ignoreCursor)
+    if InCombatLockdown() or UnitAffectingCombat("player") then return true end
+    if not ignoreCursor and CursorHasItem() then return true end
+    if SpellIsTargeting() or UnitCastingInfo("player") or UnitChannelInfo("player") then return true end
+    if lootOpen or Shown(LootFrame) or IsBankOpen() or IsGuildBankOpen() then return true end
+    return Shown(MerchantFrame) or Shown(TradeFrame) or Shown(MailFrame) or Shown(AuctionFrame)
+        or Shown(StackSplitFrame) or false
+end
+
 local function Finish(msg)
     frame:SetScript("OnUpdate", nil)
+    local quiet = job and job.quiet
     job = nil
-    if msg then Print(msg) end
+    if msg and not quiet then Print(msg) end
 end
 
 local function Abort(reason)
     ClearCursor()
+    if job and job.quiet then autoDirty, lastBusy = true, GetTime() end   -- try again once idle
     Finish("stopped - " .. reason)
 end
 
@@ -920,7 +949,9 @@ local function Step(self, elapsed)
 end
 
 -- mode: "bags" (default), "bank" or "gbank"
-local function Start(mode)
+-- quiet: started by auto mode - say nothing, and stop if the player gets busy.
+local function Start(mode, quiet)
+    local Print = quiet and function() end or Print
     if job then return Print("already running (/aom stop to cancel).") end
     if CursorHasItem() then return Print("empty your cursor first.") end
 
@@ -955,6 +986,14 @@ local function Start(mode)
     local S = #slots
     if S == 0 then return Print("no usable slots found.") end
     if next(items) == nil then return Print("nothing to arrange.") end
+    if quiet then
+        -- Item info not cached yet (e.g. right after login): grouping would be
+        -- wrong, so wait for the next idle check instead.
+        for v = 1, S do
+            if items[v] and not items[v].stack then autoDirty, lastBusy = true, GetTime(); return end
+        end
+        check = function() if PlayerBusy(true) then return "you got busy." end end
+    end
 
     if not layout then   -- bags and bank
         if separate then
@@ -1001,7 +1040,7 @@ local function Start(mode)
 
     Print(string.format("%s: %d slots, %s, %d clusters, %d moves (%d stack merges, %d to soul bags)...",
                         label, S, shape, nClusters, #moves, nMerges, nSoul))
-    job = { api = api, slots = slots, moves = moves, check = check,
+    job = { api = api, slots = slots, moves = moves, check = check, quiet = quiet,
             idx = 1, phase = "issue", acc = 0, waited = 0 }
     frame:SetScript("OnUpdate", Step)
 end
@@ -1010,11 +1049,37 @@ end
 -- Setup & slash command
 ---------------------------------------------------------------------------
 
+-- Auto mode watcher: polls only while the bags are dirty.
+local autoFrame, autoAcc = CreateFrame("Frame"), 0
+autoFrame:Hide()
+autoFrame:SetScript("OnUpdate", function(self, elapsed)
+    autoAcc = autoAcc + elapsed
+    if autoAcc < AUTO_POLL then return end
+    autoAcc = 0
+    if not (ArrangeOMaticDB and ArrangeOMaticDB.auto) then autoDirty = false end
+    if job then return end   -- stay shown: an auto run that aborts asks for a retry
+    if not autoDirty then return self:Hide() end
+    local now = GetTime()
+    if PlayerBusy() then lastBusy = now; return end
+    if now - lastBusy < (ArrangeOMaticDB.autoDelay or AUTO_DELAY) then return end
+    autoDirty = false
+    Start("bags", true)
+end)
+
+local function MarkDirty()
+    if not (ArrangeOMaticDB and ArrangeOMaticDB.auto) then return end
+    autoDirty, lastBusy = true, GetTime()
+    autoFrame:Show()
+end
+
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("BANKFRAME_OPENED")
 frame:RegisterEvent("BANKFRAME_CLOSED")
 frame:RegisterEvent("GUILDBANKFRAME_OPENED")
 frame:RegisterEvent("GUILDBANKFRAME_CLOSED")
+frame:RegisterEvent("BAG_UPDATE")
+frame:RegisterEvent("LOOT_OPENED")
+frame:RegisterEvent("LOOT_CLOSED")
 frame:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" then
         if name == "ArrangeOMatic" then
@@ -1024,8 +1089,15 @@ frame:SetScript("OnEvent", function(self, event, name)
             if ArrangeOMaticDB.pack == nil then ArrangeOMaticDB.pack = true end
             if ArrangeOMaticDB.trash == nil then ArrangeOMaticDB.trash = true end
             if ArrangeOMaticDB.ui ~= "single" then ArrangeOMaticDB.ui = "default" end
+            ArrangeOMaticDB.auto = ArrangeOMaticDB.auto and true or false
+            ArrangeOMaticDB.autoDelay = tonumber(ArrangeOMaticDB.autoDelay) or AUTO_DELAY
             LogLoad(nil)
         end
+    elseif event == "BAG_UPDATE" then
+        -- Only the inventory bags, and not the moves of a running arrangement.
+        if not job and name and name >= 0 and name <= NUM_BAG_SLOTS then MarkDirty() end
+    elseif event == "LOOT_OPENED" then lootOpen = true
+    elseif event == "LOOT_CLOSED" then lootOpen = false
     elseif event == "BANKFRAME_OPENED" then bankOpen = true
     elseif event == "BANKFRAME_CLOSED" then bankOpen = false
     elseif event == "GUILDBANKFRAME_OPENED" then gbankOpen = true
@@ -1098,9 +1170,40 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
         else
             Print("trash = " .. (ArrangeOMaticDB.trash == false and "off" or "on") .. "  (use /aom trash on|off)")
         end
+    elseif cmd == "auto" then
+        if arg == "on" or arg == "1" or arg == "yes" then
+            ArrangeOMaticDB.auto = true
+            Print("auto = on: your bags are arranged by themselves once you are idle and out of combat.")
+            MarkDirty()
+        elseif arg == "off" or arg == "0" or arg == "no" then
+            ArrangeOMaticDB.auto = false
+            Print("auto = off.")
+        else
+            Print("auto = " .. (ArrangeOMaticDB.auto and "on" or "off") .. ", delay = "
+                  .. ArrangeOMaticDB.autoDelay .. "s  (use /aom auto on|off, /aom delay <seconds>)")
+        end
+    elseif cmd == "delay" then
+        if arg == "" then
+            Print("delay = " .. ArrangeOMaticDB.autoDelay .. "s  (use /aom delay <seconds>)")
+        else
+            local n = tonumber(arg)
+            if not n or n < 1 or n > MAX_AUTO_DELAY then
+                return Print("delay must be a number of seconds from 1 to " .. MAX_AUTO_DELAY .. ".")
+            end
+            ArrangeOMaticDB.autoDelay = n
+            Print("delay set to " .. n .. "s: auto mode waits that long after you go idle.")
+            if not ArrangeOMaticDB.auto then Print("(auto is off - /aom auto on to use it)") end
+        end
     elseif cmd == "stop" then
-        if job then Abort("cancelled.") else Print("nothing running.") end
+        if job then
+            local quiet = job.quiet
+            Abort("cancelled.")
+            autoDirty = false   -- don't let auto mode restart it straight away
+            if quiet then Print("stopped - cancelled.") end
+        else
+            Print("nothing running.")
+        end
     else
-        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom stop")
+        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom auto on|off  |  /aom delay <seconds>  |  /aom stop")
     end
 end
