@@ -14,6 +14,7 @@ ArrangeOMatic - WotLK 3.3.5a
   /aom pack on|off      combine partial stacks of the same item first (default on)
   /aom trash on|off     gather grey items at the far end of your bags (default on)
   /aom stop             cancel a running arrangement
+  /aom help             detailed help on every command and the current settings
   (long form: /arrangeomatic)
 
 Model
@@ -63,7 +64,8 @@ Model
     most one partial stack per item is left. Each merge is a normal pick-up and
     drop onto the other stack, verified like any other move.
   * Clusters:
-      - every itemID that occupies 2+ slots is one cluster
+      - all quest items (GetItemInfo type "Quest") form ONE cluster together
+      - every other itemID that occupies 2+ slots is one cluster
       - all remaining single-stack items are grouped into one cluster per
         category (GetItemInfo type/subtype, or just type - see /aom groups)
     Each cluster is laid out as a block whose bounding box is as close to square
@@ -143,6 +145,13 @@ local function GetCategory(link)
     return itemType .. "/" .. (subType or "")
 end
 
+-- Quest item class name: "Quest" on English clients, the 12th auction class
+-- (localized) otherwise.
+local QUEST_TYPE = select(12, GetAuctionItemClasses())
+local function IsQuestType(itemType)
+    return itemType ~= nil and (itemType == "Quest" or itemType == QUEST_TYPE)
+end
+
 local function LinkBase(link)
     return link:match("|H(item:[^|]+)|h") or link
 end
@@ -185,10 +194,11 @@ local function Describe(api, slot)
     local count = api.info(slot)
     -- Poor (grey) quality; the link's colour code is the fallback if the item
     -- info isn't cached yet.
-    local quality = select(3, GetItemInfo(link))
+    local _, _, quality, _, _, itemType = GetItemInfo(link)
     local trash = (quality == 0) or (quality == nil and link:find("|cff9d9d9d", 1, true) ~= nil)
     return {
         trash = trash,
+        quest = IsQuestType(itemType),
         id    = tonumber(link:match("item:(%d+)")),
         cat   = GetCategory(link),
         sig   = MakeSig(link, count),
@@ -284,10 +294,13 @@ end
 ---------------------------------------------------------------------------
 
 local function BuildClusters(items, S, skip)
-    local byId = {}
+    -- Quest items all go into ONE cluster, whatever their item or stack count.
+    local byId, quest = {}, {}
     for v = 1, S do
         local it = items[v]
-        if it and not skip[v] then
+        if it and not skip[v] and it.quest then
+            quest[#quest + 1] = v
+        elseif it and not skip[v] then
             local l = byId[it.id]
             if not l then l = {}; byId[it.id] = l end
             l[#l + 1] = v
@@ -307,6 +320,14 @@ local function BuildClusters(items, S, skip)
     for cat, list in pairs(byCat) do
         table.sort(list)
         clusters[#clusters + 1] = { key = "2:" .. cat, members = list }
+    end
+    if #quest > 0 then
+        -- same item side by side inside the block
+        table.sort(quest, function(a, b)
+            if items[a].id ~= items[b].id then return items[a].id < items[b].id end
+            return a < b
+        end)
+        clusters[#clusters + 1] = { key = "0:quest", members = quest }
     end
     for _, c in ipairs(clusters) do c.size = #c.members end
 
@@ -675,10 +696,10 @@ local function BuildMerges(items, S)
                 postA = postA, postB = postB,
             }
 
-            items[dest.v] = { id = dIt.id, cat = dIt.cat, base = dIt.base, trash = dIt.trash,
+            items[dest.v] = { id = dIt.id, cat = dIt.cat, base = dIt.base, trash = dIt.trash, quest = dIt.quest,
                               count = dest.n, stack = dIt.stack, sig = postB }
             if src.n > 0 then
-                items[src.v] = { id = sIt.id, cat = sIt.cat, base = sIt.base, trash = sIt.trash,
+                items[src.v] = { id = sIt.id, cat = sIt.cat, base = sIt.base, trash = sIt.trash, quest = sIt.quest,
                                  count = src.n, stack = sIt.stack, sig = postA }
             else
                 items[src.v] = nil
@@ -1008,6 +1029,37 @@ end)
 
 SLASH_ARRANGEOMATIC1 = "/arrangeomatic"
 SLASH_ARRANGEOMATIC2 = "/aom"
+-- /aom help: every command, what it does, and the current saved values.
+local function ShowHelp()
+    local db = ArrangeOMaticDB or {}
+    local function onoff(v) return (v == false) and "off" or "on" end
+    local C, W, R = "|cffffd100", "|cffffffff", "|r"
+    local function line(s) DEFAULT_CHAT_FRAME:AddMessage(s) end
+    local function cmd(c, text) line("  " .. C .. c .. R .. "  " .. text) end
+
+    line(TAG .. " v" .. ADDON_VERSION .. " - packs and clusters your items into tidy grid blocks.")
+    line(W .. "Arranging" .. R)
+    cmd("/aom", "arrange your bags (backpack + bags 1-4). Specialised bags (quivers, herb bags...) and the keyring are left alone.")
+    cmd("/aom bank", "arrange the bank: the main bank slots plus your bank bags. The bank window must be open.")
+    cmd("/aom gbank", "arrange the guild bank tab you are viewing. You need withdraw rights on that tab.")
+    cmd("/aom stop", "cancel an arrangement in progress. Items already moved stay where they are.")
+    line(W .. "How items are grouped" .. R)
+    line("  - An item taking 2+ slots (e.g. 8 stacks of a herb) becomes one block.")
+    line("  - All quest items share one block, whatever item they are.")
+    line("  - Remaining single stacks are grouped by category (see /aom groups).")
+    line("  - Each block is laid out as close to square as possible; free space gathers at the bottom.")
+    line("  - Bags only: the Hearthstone is pinned to the first cell filled (top-left of the last bag, or")
+    line("    the top-left of the combined grid in ui single).")
+    line("  - Every move is checked before and after; if something changes mid-run, it stops cleanly.")
+    line(W .. "Settings (saved per account)" .. R)
+    cmd("/aom ui default|single", "default: one grid per Blizzard bag window; the last bag fills first so free space ends up in the backpack, where loot lands. single: all bags as ONE combined grid, for single-window bag addons. Now: " .. W .. GetUI() .. R)
+    cmd("/aom columns <n>", "width of the combined grid, 1-" .. MAX_COLUMNS .. ". Only used with ui single (Blizzard windows have a fixed width). Now: " .. W .. GetColumns() .. R)
+    cmd("/aom groups subtype|type", "subtype: group single stacks by type AND subtype (Consumable/Potion, Armor/Plate...). type: by broad type only (Consumable, Armor...). Now: " .. W .. ((db.subtypes == false) and "type" or "subtype") .. R)
+    cmd("/aom pack on|off", "before arranging, combine partial stacks of the same item so at most one partial stack is left. Now: " .. W .. onoff(db.pack) .. R)
+    cmd("/aom trash on|off", "bags only: put grey items in one unbroken run at the far end, opposite the Hearthstone (bottom-right of the backpack in ui default) - handy at a vendor. Now: " .. W .. onoff(db.trash) .. R)
+    line("  Any setting command without a value shows its current value. Long form: /arrangeomatic.")
+end
+
 SlashCmdList["ARRANGEOMATIC"] = function(msg)
     local cmd, arg = (msg or ""):lower():match("^%s*(%S*)%s*(%S*)")
     if cmd == "" or cmd == "run" or cmd == "bags" then
@@ -1073,7 +1125,9 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
         end
     elseif cmd == "stop" then
         if job then Abort("cancelled.") else Print("nothing running.") end
+    elseif cmd == "help" or cmd == "h" or cmd == "?" then
+        ShowHelp()
     else
-        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom stop")
+        Print("/aom help  |  /aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom stop")
     end
 end
