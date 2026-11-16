@@ -14,6 +14,9 @@ ArrangeOMatic - WotLK 3.3.5a
   /aom groups type      group single items by broad type only
   /aom pack on|off      combine partial stacks of the same item first (default on)
   /aom trash on|off     gather grey items at the far end of your bags (default on)
+  /aom fav snapshot     make everything in your bags now your favorites (per character)
+  /aom fav add|remove <item>   add/remove favorites (shift-click items, or item IDs)
+  /aom fav list|clear   show / remove all favorites
   /aom auto on|off      arrange your bags by itself when you are idle (default off)
   /aom delay <seconds>  how long you must be idle before auto mode arranges (default 5)
   /aom stop             cancel a running arrangement
@@ -59,6 +62,10 @@ Model
     the very last cell in fill order, then backwards from there: slot 1 onwards
     in single mode, the bottom-right of the backpack leftwards and upwards in
     default mode (spilling into bag 1 if the backpack runs out).
+  * Favorites (bags only, per character, /aom fav): if you have any, every
+    non-grey item that is not a favorite is unwanted and goes in a second
+    unbroken run right before the greys. No favorites: arranged as before.
+    Needs /aom trash on, like the greys.
   * The guild bank window is 14 columns x 7 rows, numbered column by column, so
     for /aom gbank the grid "width" is fixed at 7 (one model row = one window
     column, drawn transposed, which keeps clusters square in the window). The
@@ -194,22 +201,29 @@ local function IsLocked(api, slot)
     return locked and true or false
 end
 
+local function ItemID(link)
+    return link and tonumber(link:match("item:(%d+)"))
+end
+
+-- Poor (grey) quality; the link's colour code is the fallback if the item
+-- info isn't cached yet (quality nil).
+local function IsGrey(link, quality)
+    return quality == 0 or (quality == nil and link:find("|cff9d9d9d", 1, true) ~= nil)
+end
+
 local function Describe(api, slot)
     local link = api.link(slot)
     if not link then return nil end
     local count = api.info(slot)
-    -- Poor (grey) quality; the link's colour code is the fallback if the item
-    -- info isn't cached yet.
-    local quality = select(3, GetItemInfo(link))
-    local trash = (quality == 0) or (quality == nil and link:find("|cff9d9d9d", 1, true) ~= nil)
+    local _, _, quality, _, _, _, _, stack = GetItemInfo(link)
     return {
-        trash = trash,
-        id    = tonumber(link:match("item:(%d+)")),
+        trash = IsGrey(link, quality),
+        id    = ItemID(link),
         cat   = GetCategory(link),
         sig   = MakeSig(link, count),
         base  = LinkBase(link),
         count = count or 1,
-        stack = select(8, GetItemInfo(link)),   -- max stack size (nil if not cached)
+        stack = stack,   -- max stack size (nil if not cached)
     }
 end
 
@@ -734,7 +748,9 @@ end
 -- or just a column count, meaning one combined window of that width.
 -- sinkTrash: grey items go, as one run of consecutive cells, to the very end of
 -- the fill order - the opposite end from the Hearthstone.
-local function BuildMoves(S, items, layout, pinHearthstone, sinkTrash)
+-- favs: optional set of favorite itemIDs. With sinkTrash, every other non-grey
+-- item is unwanted and goes in a second run right before the greys.
+local function BuildMoves(S, items, layout, pinHearthstone, sinkTrash, favs)
     if type(layout) == "number" then layout = SingleWindowLayout(S, layout) end
 
     -- Per-window geometry. P is the padded grid index described above GrowRegion,
@@ -777,25 +793,37 @@ local function BuildMoves(S, items, layout, pinHearthstone, sinkTrash)
     -- Trash takes the last cells in fill order: the last cell of the last window
     -- filled, then backwards from there (spilling into the previous window if it
     -- has to), so it is one unbroken run of slots.
-    local skip, trash, trashCells = {}, {}, {}
+    -- Unwanted items (not favorites) take the cells right before the trash.
+    local skip, trash, trashCells, unwanted, unwantedCells = {}, {}, {}, {}, {}
     if hsV then skip[hsV] = true end
     if sinkTrash then
         for v = 1, S do
-            if items[v] and items[v].trash and not skip[v] then
-                trash[#trash + 1] = v
-                skip[v] = true
+            local it = items[v]
+            if it and not skip[v] then
+                if it.trash then
+                    trash[#trash + 1] = v
+                    skip[v] = true
+                elseif favs and not favs[it.id] then
+                    unwanted[#unwanted + 1] = v
+                    skip[v] = true
+                end
             end
         end
-        local need = #trash
+        -- far end first: the greys, then the unwanted items
+        local nTrash, n, need = #trash, 0, #trash + #unwanted
         for gi = #grids, 1, -1 do
             local g = grids[gi]
             for P = g.size + g.off - 1, g.off, -1 do
-                if need == 0 then break end
+                if n == need then break end
                 if not g.reserved.cells[P] then
                     g.reserved.cells[P] = true
                     g.free = g.free - 1
-                    trashCells[#trashCells + 1] = g.toV(P)
-                    need = need - 1
+                    n = n + 1
+                    if n <= nTrash then
+                        trashCells[n] = g.toV(P)
+                    else
+                        unwantedCells[n - nTrash] = g.toV(P)
+                    end
                 end
             end
         end
@@ -829,6 +857,7 @@ local function BuildMoves(S, items, layout, pinHearthstone, sinkTrash)
         end
     end
     Assign(dest, trash, trashCells)
+    Assign(dest, unwanted, unwantedCells)
     if hsV then dest[hsV] = pinV end
     for tok, d in pairs(dest) do want[d] = tok end
 
@@ -1027,7 +1056,9 @@ local function Start(mode, auto)
     end
 
     local sinkTrash = pin and ArrangeOMaticDB and ArrangeOMaticDB.trash ~= false
-    local moves, nClusters, stats = BuildMoves(S, items, layout, pin, sinkTrash)
+    local favs = ArrangeOMaticCharDB.favs
+    if not next(favs) then favs = nil end
+    local moves, nClusters, stats = BuildMoves(S, items, layout, pin, sinkTrash, favs)
     local nMerges, nSoul = #merges, #soulMoves
     for i = 1, #merges do soulMoves[#soulMoves + 1] = merges[i] end
     for i = 1, #moves do soulMoves[#soulMoves + 1] = moves[i] end
@@ -1092,6 +1123,8 @@ frame:SetScript("OnEvent", function(self, event, name)
             if ArrangeOMaticDB.ui ~= "single" then ArrangeOMaticDB.ui = "default" end
             ArrangeOMaticDB.auto = ArrangeOMaticDB.auto and true or false
             ArrangeOMaticDB.autoDelay = tonumber(ArrangeOMaticDB.autoDelay) or AUTO_DELAY
+            ArrangeOMaticCharDB = ArrangeOMaticCharDB or {}
+            if type(ArrangeOMaticCharDB.favs) ~= "table" then ArrangeOMaticCharDB.favs = {} end
             LogLoad(nil)
         end
     elseif event == "BAG_UPDATE" then
@@ -1105,6 +1138,95 @@ frame:SetScript("OnEvent", function(self, event, name)
     elseif event == "GUILDBANKFRAME_CLOSED" then gbankOpen = false
     end
 end)
+
+-- Favorites (per character)
+-- ArrangeOMaticCharDB exists from ADDON_LOADED on; NO_FAVS covers tooltips
+-- shown before that without allocating.
+local NO_FAVS = {}
+local function Favs() return ArrangeOMaticCharDB and ArrangeOMaticCharDB.favs or NO_FAVS end
+
+local function FavCount()
+    local n = 0
+    for _ in pairs(Favs()) do n = n + 1 end
+    return n
+end
+
+-- Mark a tooltip line on favorite items.
+local function AddFavLine(tt)
+    local favs = Favs()
+    if not next(favs) then return end
+    local _, link = tt:GetItem()
+    local id = ItemID(link)
+    if id and favs[id] then
+        tt:AddLine("Arrange-o-Matic: favorite", 0.2, 1, 0.6)
+    end
+end
+for _, tt in ipairs({ GameTooltip, ItemRefTooltip, ShoppingTooltip1, ShoppingTooltip2 }) do
+    if tt then tt:HookScript("OnTooltipSetItem", AddFavLine) end
+end
+
+local function FavCommand(arg, msg)
+    local favs = Favs()
+    if arg == "snapshot" or arg == "snap" then
+        local new, n = {}, 0
+        for bag = 0, NUM_BAG_SLOTS do
+            for slot = 1, GetContainerNumSlots(bag) or 0 do
+                local link = GetContainerItemLink(bag, slot)
+                local id = ItemID(link)
+                if id and not new[id] then
+                    local name, _, quality = GetItemInfo(link)
+                    if not IsGrey(link, quality) then
+                        new[id] = name or true
+                        n = n + 1
+                    end
+                end
+            end
+        end
+        ArrangeOMaticCharDB.favs = new
+        Print("favorites = the " .. n .. " different non-grey item(s) in your bags now (replacing the old list). Anything else counts as unwanted.")
+        MarkDirty()
+    elseif arg == "add" or arg == "remove" or arg == "rem" or arg == "del" then
+        local adding = (arg == "add")
+        local rest = (msg or ""):match("^%s*%S+%s+%S+%s*(.*)$") or ""
+        local ids = {}
+        for id in rest:gmatch("item:(%d+)") do ids[#ids + 1] = tonumber(id) end
+        if #ids == 0 then
+            for id in rest:gmatch("%d+") do ids[#ids + 1] = tonumber(id) end
+        end
+        if #ids == 0 then
+            return Print("shift-click one or more items into the command, e.g. /aom fav " .. (adding and "add" or "remove") .. " [Item], or give item IDs.")
+        end
+        for _, id in ipairs(ids) do
+            local name, link = GetItemInfo(id)
+            local label = link or name or ("item " .. id)
+            if adding then
+                favs[id] = name or favs[id] or true
+                Print("favorites + " .. label)
+            elseif favs[id] then
+                favs[id] = nil
+                Print("favorites - " .. label)
+            else
+                Print(label .. " is not a favorite.")
+            end
+        end
+        if not next(favs) then Print("no favorites left: bags are arranged as usual again.") end
+        MarkDirty()
+    elseif arg == "list" then
+        local n = 0
+        for id, saved in pairs(favs) do
+            n = n + 1
+            local name, link = GetItemInfo(id)
+            Print("  " .. (link or name or (type(saved) == "string" and saved) or "item") .. " (" .. id .. ")")
+        end
+        Print(n == 0 and "no favorites (/aom fav snapshot or /aom fav add <item>)." or (n .. " favorite(s)."))
+    elseif arg == "clear" then
+        ArrangeOMaticCharDB.favs = {}
+        Print("favorites cleared: bags are arranged as usual again.")
+        MarkDirty()
+    else
+        Print(FavCount() .. " favorite(s)  (use /aom fav snapshot|add|remove|list|clear)")
+    end
+end
 
 SLASH_ARRANGEOMATIC1 = "/arrangeomatic"
 SLASH_ARRANGEOMATIC2 = "/aom"
@@ -1137,6 +1259,9 @@ local function ShowHelp()
     cmd("/aom groups subtype|type", "subtype: group single stacks by type AND subtype (Consumable/Potion, Armor/Plate...). type: by broad type only (Consumable, Armor...)." .. now(db.subtypes == false and "type" or "subtype"))
     cmd("/aom pack on|off", "before arranging, combine partial stacks of the same item, leaving at most one partial stack each." .. now(onoff(db.pack ~= false)))
     cmd("/aom trash on|off", "bags only: put grey items in one unbroken run at the far end, opposite the Hearthstone - easy to find at a vendor." .. now(onoff(db.trash ~= false)))
+    cmd("/aom fav snapshot", "this character: make everything (non-grey) in your bags right now your favorites, replacing the old list. While you have favorites, every other item is unwanted: bags put it in one run right before the greys at the far end. Favorites get a line in their tooltip." .. now(FavCount() .. " favorite(s)"))
+    cmd("/aom fav add|remove <item>", "add or remove favorites: shift-click items into the command, or type item IDs. Several at once is fine.")
+    cmd("/aom fav list|clear", "show your favorites, or remove them all (bags are then arranged as usual).")
     cmd("/aom auto on|off", "arrange your bags by themselves after they change, once you are idle: out of combat, not looting or casting, nothing on the cursor, and no vendor, bank, mail, trade or auction window open. If you get busy mid-run it stops and tries again later." .. now(onoff(db.auto)))
     cmd("/aom delay <seconds>", "how long you must be idle before auto mode arranges, 1-" .. MAX_AUTO_DELAY .. "." .. now((db.autoDelay or AUTO_DELAY) .. "s"))
     line("  Long form: /arrangeomatic.")
@@ -1204,6 +1329,9 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
         else
             Print("trash = " .. (ArrangeOMaticDB.trash == false and "off" or "on") .. "  (use /aom trash on|off)")
         end
+    elseif cmd == "fav" or cmd == "favs" or cmd == "favorite" or cmd == "favorites"
+        or cmd == "favourite" or cmd == "favourites" then
+        FavCommand(arg, msg)
     elseif cmd == "auto" then
         if arg == "on" or arg == "1" or arg == "yes" then
             ArrangeOMaticDB.auto = true
@@ -1239,6 +1367,6 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
         ShowHelp()
     else
         Print("unknown command. /aom help explains every command; in short:")
-        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom auto on|off  |  /aom delay <seconds>  |  /aom stop  |  /aom help")
+        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom fav snapshot|add|remove|list|clear  |  /aom auto on|off  |  /aom delay <seconds>  |  /aom stop  |  /aom help")
     end
 end

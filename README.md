@@ -7,7 +7,7 @@
 *Packs and clusters your bag items into tidy grid blocks — bags, bank and guild bank, laid out the way your bag windows actually look.*
 
 ![World of Warcraft WotLK 3.3.5a](https://img.shields.io/static/v1?style=flat-square&label=WoW&message=WotLK%203.3.5a&color=a335ee)
-![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.6.0&color=2ea043)
+![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.7.0&color=2ea043)
 ![Lua 5.1](https://img.shields.io/static/v1?style=flat-square&label=Lua&message=5.1&color=000080)
 
 ⭐ If you find this addon useful, star it on GitHub — it helps others discover it!
@@ -33,9 +33,10 @@ Arrange-o-Matic is a lightweight organizer addon for the Wrath of the Lich King 
 - **Hearthstone pinned** – when arranging your bags, the Hearthstone always ends up in the first cell of the top row of the first window being filled: the top-left of your last bag with the default UI, the left end of the combined grid with a single-window bag addon.
 - **Soul Shards to soul bags** – Soul Shards in your regular bags are moved into free slots of your soul bags first (bags and bank); any that don't fit are arranged with everything else.
 - **Trash at the far end** – when arranging your bags, grey (poor-quality) items are pulled out of their groups and packed into one unbroken run of slots at the opposite end from the Hearthstone: the bottom-right of the backpack, running leftwards and upwards (spilling into bag 1 if needed) with the default UI, or slot 1 onwards — the bottom-right of the combined grid — with a single-window bag addon. Easy to find at a vendor. `/aom trash off` turns it off (on by default).
+- **Favorites** – per character. `/aom fav snapshot` makes everything (non-grey) in your bags right now your favorites; `/aom fav add`/`remove` adjust the list (shift-click items into the command). While you have any favorites, every other item counts as unwanted: when arranging your bags it goes in one unbroken run right before the greys, so the far end reads greys → unwanted → (free space and) your favorites. With no favorites, bags are arranged as before. Favorite items get an "Arrange-o-Matic: favorite" line in their tooltip.
 - **Auto-arrange** – `/aom auto on` arranges your bags by itself a few seconds after they change once you are idle: out of combat, no loot window, no vendor/bank/guild bank/mail/trade/auction window open, not casting, nothing on the cursor. If you get busy mid-run it stops and tries again later. Off by default; `/aom delay <seconds>` sets how long you must be idle first (default 5).
 - **Safe execution** – every move, arrangement move or stack merge alike, is verified before and after; the run aborts cleanly if something changes mid-sort instead of shuffling items around. Cancel any time with `/aom stop`.
-- **Saved settings** – window mode, grid width, grouping, stack-packing, trash and auto settings are stored per account.
+- **Saved settings** – window mode, grid width, grouping, stack-packing, trash and auto settings are stored per account; favorites per character.
 
 ## Installation
 
@@ -70,6 +71,9 @@ Type in any chat input:
 | `/aom groups type` | Group single items by broad type only |
 | `/aom pack on\|off` | Stack packing: combine partial stacks of the same item before arranging (default on) — `/aom pack` alone shows the current setting |
 | `/aom trash on\|off` | Gather grey items at the far end of your bags, opposite the Hearthstone (default on) — `/aom trash` alone shows the current setting |
+| `/aom fav snapshot` | Make every (non-grey) item in your bags right now a favorite, replacing the old list (per character) |
+| `/aom fav add <item>` / `/aom fav remove <item>` | Add / remove favorites: shift-click one or more items into the command, or give item IDs |
+| `/aom fav list` / `/aom fav clear` | Show your favorites / remove them all |
 | `/aom auto on\|off` | Arrange your bags automatically whenever you are idle and out of combat (default off) — `/aom auto` alone shows the current setting |
 | `/aom delay <seconds>` | How long you must be idle before auto mode arranges your bags, 1–60 (default 5) — `/aom delay` alone shows the current value |
 | `/aom stop` | Cancel an arrangement in progress |
