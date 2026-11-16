@@ -22,7 +22,9 @@ Model
       bags   - backpack, then bags 1-4
       bank   - the 28 main bank slots, then the 7 bank bags
       gbank  - the 98 slots of the active guild bank tab
-    Specialised bags (quivers, herb bags, ...) and the keyring are left alone.
+    Specialised bags (quivers, herb bags, ...) and the keyring are left alone,
+    except that Soul Shards in general slots are first moved into any free
+    slots of your soul bags (bags and bank).
   * "ui single" (one combined bag window, for single-bag addons):
     that list is shown as ONE grid with N columns the way single-bag addons
     draw it: slot 1 is the bottom-right cell, slots run right-to-left and rows
@@ -80,6 +82,8 @@ local GBANK_SLOTS     = MAX_GUILDBANK_SLOTS_PER_TAB or 98
 -- (NUM_SLOTS_PER_GUILDBANK_GROUP is 14, but that is a pair of columns.)
 local GBANK_COLUMN_H  = 7
 local HEARTHSTONE_ID  = 6948  -- always pinned to the first cell of the top row of the first window
+local SOUL_SHARD_ID   = 6265
+local SOUL_BAG_FAMILY = 0x0004  -- GetContainerNumFreeSlots bag family bit for soul bags
 
 -- Default Blizzard UI geometry (verified against the 3.3.5a FrameXML):
 --   ContainerFrame.lua: NUM_CONTAINER_COLUMNS = 4; button i (1 = bottom-right)
@@ -198,10 +202,11 @@ local function Describe(api, slot)
     }
 end
 
--- Returns slots, items and groups. groups has one entry per bag that was
--- included: { bag = id, first = index of its first slot in `slots`, size = n }.
+-- Returns slots, items, groups and soulFree. groups has one entry per bag that
+-- was included: { bag = id, first = index of its first slot in `slots`, size = n }.
+-- soulFree lists the empty slots of soul bags ({ bag, slot }), in bag order.
 local function ScanBags(bagIds)
-    local slots, items, groups = {}, {}, {}
+    local slots, items, groups, soulFree = {}, {}, {}, {}
     for _, bag in ipairs(bagIds) do
         local n = GetContainerNumSlots(bag)
         if n and n > 0 then
@@ -209,6 +214,13 @@ local function ScanBags(bagIds)
             if bag > 0 then
                 local _, bagType = GetContainerNumFreeSlots(bag)
                 general = (bagType == nil or bagType == 0)
+                if bagType and bit.band(bagType, SOUL_BAG_FAMILY) ~= 0 then
+                    for i = 1, n do
+                        if not GetContainerItemLink(bag, i) then
+                            soulFree[#soulFree + 1] = { bag = bag, slot = i }
+                        end
+                    end
+                end
             end
             if general then
                 groups[#groups + 1] = { bag = bag, first = #slots + 1, size = n }
@@ -220,7 +232,7 @@ local function ScanBags(bagIds)
             end
         end
     end
-    return slots, items, groups
+    return slots, items, groups, soulFree
 end
 
 -- Geometry of the windows the slot list is drawn in. A layout is a list of
@@ -912,12 +924,12 @@ local function Start(mode)
     if job then return Print("already running (/aom stop to cancel).") end
     if CursorHasItem() then return Print("empty your cursor first.") end
 
-    local api, slots, items, groups, layout, pin, check, label, shape
+    local api, slots, items, groups, soulFree, layout, pin, check, label, shape
     local separate = (GetUI() == "default")
     if mode == "bank" then
         if not IsBankOpen() then return Print("open your bank first.") end
         api, label = BagAPI, "bank"
-        slots, items, groups = ScanBags(BankBagIds())
+        slots, items, groups, soulFree = ScanBags(BankBagIds())
         check = function() if not IsBankOpen() then return "the bank was closed." end end
     elseif mode == "gbank" then
         if not IsGuildBankOpen() then return Print("open your guild bank first.") end
@@ -937,7 +949,7 @@ local function Start(mode)
         end
     else
         api, label, pin = BagAPI, "bags", true
-        slots, items, groups = ScanBags(InventoryBagIds())
+        slots, items, groups, soulFree = ScanBags(InventoryBagIds())
     end
 
     local S = #slots
@@ -955,6 +967,20 @@ local function Start(mode)
         end
     end
 
+    -- Soul Shards go into free soul bag slots first. Those slots are appended
+    -- after slot S so the executor can address them; planning only sees 1..S.
+    local soulMoves = {}
+    for v = 1, S do
+        if not soulFree or #soulFree == 0 then break end
+        local it = items[v]
+        if it and it.id == SOUL_SHARD_ID then
+            slots[#slots + 1] = table.remove(soulFree, 1)
+            soulMoves[#soulMoves + 1] = { a = v, b = #slots,
+                preA = it.sig, preB = "", postA = "", postB = it.sig }
+            items[v] = nil
+        end
+    end
+
     -- Pack first (combine partial stacks), then arrange what is left.
     local merges = {}
     if ArrangeOMaticDB and ArrangeOMaticDB.pack ~= false then
@@ -967,13 +993,14 @@ local function Start(mode)
     if split > 0 then
         Print(string.format("note: not enough free room to keep %d cluster(s) as solid blocks.", split))
     end
-    local nMerges = #merges
-    for i = 1, #moves do merges[#merges + 1] = moves[i] end
-    moves = merges
+    local nMerges, nSoul = #merges, #soulMoves
+    for i = 1, #merges do soulMoves[#soulMoves + 1] = merges[i] end
+    for i = 1, #moves do soulMoves[#soulMoves + 1] = moves[i] end
+    moves = soulMoves
     if #moves == 0 then return Print(label .. " already arranged.") end
 
-    Print(string.format("%s: %d slots, %s, %d clusters, %d moves (%d stack merges)...",
-                        label, S, shape, nClusters, #moves, nMerges))
+    Print(string.format("%s: %d slots, %s, %d clusters, %d moves (%d stack merges, %d to soul bags)...",
+                        label, S, shape, nClusters, #moves, nMerges, nSoul))
     job = { api = api, slots = slots, moves = moves, check = check,
             idx = 1, phase = "issue", acc = 0, waited = 0 }
     frame:SetScript("OnUpdate", Step)
