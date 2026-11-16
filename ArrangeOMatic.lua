@@ -2,6 +2,7 @@
 ArrangeOMatic - WotLK 3.3.5a
 
   /aom                  arrange your bags
+  /aom help             every command explained, with the current settings
   /aom bank             arrange the character bank (bank must be open)
   /aom gbank            arrange the currently open guild bank tab
   /aom ui default       you use the default Blizzard UI: one window per bag  (default)
@@ -110,7 +111,7 @@ local TIMEOUT = 8          -- seconds to wait for the server before giving up
 -- Auto mode (/aom auto): after the bags change, wait until the player has been
 -- idle (no combat, looting, vendor/bank/mail/trade window, casting, item on the
 -- cursor...) for the delay (/aom delay, default AUTO_DELAY seconds), then
--- arrange the bags silently.
+-- arrange the bags.
 local AUTO_DELAY     = 5
 local MAX_AUTO_DELAY = 60
 local AUTO_POLL  = 0.5
@@ -885,14 +886,13 @@ end
 
 local function Finish(msg)
     frame:SetScript("OnUpdate", nil)
-    local quiet = job and job.quiet
     job = nil
-    if msg and not quiet then Print(msg) end
+    if msg then Print(msg) end
 end
 
 local function Abort(reason)
     ClearCursor()
-    if job and job.quiet then autoDirty, lastBusy = true, GetTime() end   -- try again once idle
+    if job and job.auto then autoDirty, lastBusy = true, GetTime() end   -- try again once idle
     Finish("stopped - " .. reason)
 end
 
@@ -949,9 +949,9 @@ local function Step(self, elapsed)
 end
 
 -- mode: "bags" (default), "bank" or "gbank"
--- quiet: started by auto mode - say nothing, and stop if the player gets busy.
-local function Start(mode, quiet)
-    local Print = quiet and function() end or Print
+-- auto: started by auto mode - stop if the player gets busy, and say nothing
+-- if there is nothing to do (the bags change all the time).
+local function Start(mode, auto)
     if job then return Print("already running (/aom stop to cancel).") end
     if CursorHasItem() then return Print("empty your cursor first.") end
 
@@ -986,7 +986,7 @@ local function Start(mode, quiet)
     local S = #slots
     if S == 0 then return Print("no usable slots found.") end
     if next(items) == nil then return Print("nothing to arrange.") end
-    if quiet then
+    if auto then
         -- Item info not cached yet (e.g. right after login): grouping would be
         -- wrong, so wait for the next idle check instead.
         for v = 1, S do
@@ -1028,19 +1028,20 @@ local function Start(mode, quiet)
 
     local sinkTrash = pin and ArrangeOMaticDB and ArrangeOMaticDB.trash ~= false
     local moves, nClusters, stats = BuildMoves(S, items, layout, pin, sinkTrash)
-    local split = stats.pure + stats.flood
-    if split > 0 then
-        Print(string.format("note: not enough free room to keep %d cluster(s) as solid blocks.", split))
-    end
     local nMerges, nSoul = #merges, #soulMoves
     for i = 1, #merges do soulMoves[#soulMoves + 1] = merges[i] end
     for i = 1, #moves do soulMoves[#soulMoves + 1] = moves[i] end
     moves = soulMoves
+    if auto and #moves == 0 then return end
+    local split = stats.pure + stats.flood
+    if split > 0 then
+        Print(string.format("note: not enough free room to keep %d cluster(s) as solid blocks.", split))
+    end
     if #moves == 0 then return Print(label .. " already arranged.") end
 
     Print(string.format("%s: %d slots, %s, %d clusters, %d moves (%d stack merges, %d to soul bags)...",
                         label, S, shape, nClusters, #moves, nMerges, nSoul))
-    job = { api = api, slots = slots, moves = moves, check = check, quiet = quiet,
+    job = { api = api, slots = slots, moves = moves, check = check, auto = auto,
             idx = 1, phase = "issue", acc = 0, waited = 0 }
     frame:SetScript("OnUpdate", Step)
 end
@@ -1107,6 +1108,39 @@ end)
 
 SLASH_ARRANGEOMATIC1 = "/arrangeomatic"
 SLASH_ARRANGEOMATIC2 = "/aom"
+
+-- /aom help: every command, what it does, and the current saved values.
+local function ShowHelp()
+    local db = ArrangeOMaticDB or {}
+    local function onoff(v) return v and "on" or "off" end
+    local C, W, R = "|cffffd100", "|cffffffff", "|r"
+    local function line(s) DEFAULT_CHAT_FRAME:AddMessage(s) end
+    local function cmd(c, text) line("  " .. C .. c .. R .. " - " .. text) end
+    local function now(v) return " Now: " .. W .. v .. R .. "." end
+
+    line(TAG .. " v" .. ADDON_VERSION .. " - packs your items into tidy, square blocks.")
+    line(W .. "Arranging" .. R)
+    cmd("/aom", "arrange your bags (backpack and bags 1-4). Specialised bags (quivers, herb bags...) and the keyring are left alone.")
+    cmd("/aom bank", "arrange the bank: the main bank slots plus your bank bags. The bank must be open.")
+    cmd("/aom gbank", "arrange the guild bank tab you are looking at. You need permission to move items on that tab.")
+    cmd("/aom stop", "cancel an arrangement in progress. Items already moved stay where they are.")
+    line(W .. "How items are grouped" .. R)
+    line("  - An item taking 2+ slots (e.g. 8 stacks of a herb) becomes one block.")
+    line("  - The remaining single stacks are grouped by category (see /aom groups).")
+    line("  - Each block is as close to square as possible; free space gathers where new loot lands.")
+    line("  - Bags: the Hearthstone always goes first - the top-left of your last bag (of the combined grid in ui single).")
+    line("  - Soul Shards in regular slots are moved into free soul bag slots first.")
+    line("  - Every move is checked before and after; if something changes mid-run, it stops cleanly.")
+    line(W .. "Settings (saved per account; leave out the value to see the current one)" .. R)
+    cmd("/aom ui default|single", "default: each Blizzard bag window is its own grid, and the last bag fills first so the backpack keeps the free space. single: all bags as ONE grid, for one-window bag addons." .. now(GetUI()))
+    cmd("/aom columns <n>", "width of that one grid, 1-" .. MAX_COLUMNS .. ". Only used with ui single - Blizzard's windows have a fixed width." .. now(GetColumns()))
+    cmd("/aom groups subtype|type", "subtype: group single stacks by type AND subtype (Consumable/Potion, Armor/Plate...). type: by broad type only (Consumable, Armor...)." .. now(db.subtypes == false and "type" or "subtype"))
+    cmd("/aom pack on|off", "before arranging, combine partial stacks of the same item, leaving at most one partial stack each." .. now(onoff(db.pack ~= false)))
+    cmd("/aom trash on|off", "bags only: put grey items in one unbroken run at the far end, opposite the Hearthstone - easy to find at a vendor." .. now(onoff(db.trash ~= false)))
+    cmd("/aom auto on|off", "arrange your bags by themselves after they change, once you are idle: out of combat, not looting or casting, nothing on the cursor, and no vendor, bank, mail, trade or auction window open. If you get busy mid-run it stops and tries again later." .. now(onoff(db.auto)))
+    cmd("/aom delay <seconds>", "how long you must be idle before auto mode arranges, 1-" .. MAX_AUTO_DELAY .. "." .. now((db.autoDelay or AUTO_DELAY) .. "s"))
+    line("  Long form: /arrangeomatic.")
+end
 SlashCmdList["ARRANGEOMATIC"] = function(msg)
     local cmd, arg = (msg or ""):lower():match("^%s*(%S*)%s*(%S*)")
     if cmd == "" or cmd == "run" or cmd == "bags" then
@@ -1196,14 +1230,15 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
         end
     elseif cmd == "stop" then
         if job then
-            local quiet = job.quiet
             Abort("cancelled.")
             autoDirty = false   -- don't let auto mode restart it straight away
-            if quiet then Print("stopped - cancelled.") end
         else
             Print("nothing running.")
         end
+    elseif cmd == "help" or cmd == "h" or cmd == "?" then
+        ShowHelp()
     else
-        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom auto on|off  |  /aom delay <seconds>  |  /aom stop")
+        Print("unknown command. /aom help explains every command; in short:")
+        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom auto on|off  |  /aom delay <seconds>  |  /aom stop  |  /aom help")
     end
 end
