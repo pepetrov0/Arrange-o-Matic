@@ -7,7 +7,7 @@
 *Packs and clusters your bag items into tidy grid blocks — bags, bank and guild bank, laid out the way your bag windows actually look.*
 
 ![World of Warcraft WotLK 3.3.5a](https://img.shields.io/static/v1?style=flat-square&label=WoW&message=WotLK%203.3.5a&color=a335ee)
-![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.4.0&color=2ea043)
+![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.3.0&color=2ea043)
 ![Lua 5.1](https://img.shields.io/static/v1?style=flat-square&label=Lua&message=5.1&color=000080)
 
 ⭐ If you find this addon useful, star it on GitHub — it helps others discover it!
@@ -29,7 +29,7 @@ Arrange-o-Matic is a lightweight organizer addon for the Wrath of the Lich King 
   - **`ui default`** – the stock Blizzard windows, arranged exactly as they appear: each bag is its own 4-column grid, the main bank is a 7×4 grid, bank bags are 4 columns each. Clusters that fit your largest bag go whole into the first window (in fill order) that keeps them in one block; anything larger is always split over several bags (the main bank doesn't count as a bag), with the pieces filling in the usual order — last bag first — so the main bank receives items only once every bank bag is full. The free space ends up in the backpack and your first bags: right where new loot lands.
   - **`ui single`** – all of your bags (or the whole bank) as one combined N-column grid, for single-window bag addons.
 - **Bags, bank and guild bank** – the backpack, all bag slots, the bank (including bank bags) and any guild bank tab you can open. Specialized bags (quivers, herb bags, ammo pouches…) and the keyring are left untouched.
-- **Smart clusters** – items occupying several slots (e.g. 8× Dreaming Glory) form one block; all quest items share a single block; remaining single-stack items are grouped by type/subtype, or by broad type only — your choice.
+- **Smart clusters** – items occupying several slots (e.g. 8× Dreaming Glory) form one block; remaining single-stack items are grouped by type/subtype, or by broad type only — your choice.
 - **Hearthstone pinned** – when arranging your bags, the Hearthstone always ends up in the first cell of the top row of the first window being filled: the top-left of your last bag with the default UI, the left end of the combined grid with a single-window bag addon.
 - **Trash at the far end** – when arranging your bags, grey (poor-quality) items are pulled out of their groups and packed into one unbroken run of slots at the opposite end from the Hearthstone: the bottom-right of the backpack, running leftwards and upwards (spilling into bag 1 if needed) with the default UI, or slot 1 onwards — the bottom-right of the combined grid — with a single-window bag addon. Easy to find at a vendor. `/aom trash off` turns it off (on by default).
 - **Safe execution** – every move, arrangement move or stack merge alike, is verified before and after; the run aborts cleanly if something changes mid-sort instead of shuffling items around. Cancel any time with `/aom stop`.
@@ -68,7 +68,6 @@ Type in any chat input:
 | `/aom pack on\|off` | Stack packing: combine partial stacks of the same item before arranging (default on) — `/aom pack` alone shows the current setting |
 | `/aom trash on\|off` | Gather grey items at the far end of your bags, opposite the Hearthstone (default on) — `/aom trash` alone shows the current setting |
 | `/aom stop` | Cancel an arrangement in progress |
-| `/aom help` | Print detailed help on every command, with your current settings |
 
 Example session (with the default `ui` setting):
 
