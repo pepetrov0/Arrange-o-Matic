@@ -116,8 +116,8 @@ local TICK    = 0.05       -- seconds between steps
 local TIMEOUT = 8          -- seconds to wait for the server before giving up
 
 -- Auto mode (/aom auto): after the bags change, wait until the player has been
--- idle (no combat, looting, vendor/bank/mail/trade window, casting, item on the
--- cursor...) for the delay (/aom delay, default AUTO_DELAY seconds), then
+-- idle (alive, no combat, looting, vendor/bank/mail/trade window, casting, item
+-- on the cursor...) for the delay (/aom delay, default AUTO_DELAY seconds), then
 -- arrange the bags.
 local AUTO_DELAY     = 5
 local MAX_AUTO_DELAY = 60
@@ -918,6 +918,7 @@ local function Shown(f) return f and f:IsShown() end
 -- Is the player doing something an arrangement would get in the way of?
 -- ignoreCursor: the executor itself puts items on the cursor while it runs.
 local function PlayerBusy(ignoreCursor)
+    if UnitIsDeadOrGhost("player") then return true end   -- items can't be moved while dead
     if InCombatLockdown() or UnitAffectingCombat("player") then return true end
     if not ignoreCursor and CursorHasItem() then return true end
     if SpellIsTargeting() or UnitCastingInfo("player") or UnitChannelInfo("player") then return true end
@@ -945,6 +946,7 @@ local function Step(self, elapsed)
     job.acc = 0
 
     local api = job.api
+    if UnitIsDeadOrGhost("player") then return Abort("you died.") end
     if job.check then
         local problem = job.check()
         if problem then return Abort(problem) end
@@ -995,6 +997,7 @@ end
 -- if there is nothing to do (the bags change all the time).
 local function Start(mode, auto)
     if job then return Print("already running (/aom stop to cancel).") end
+    if UnitIsDeadOrGhost("player") then return Print("you can't move items while dead.") end
     if CursorHasItem() then return Print("empty your cursor first.") end
 
     local api, slots, items, groups, soulFree, layout, pin, check, label, shape
@@ -1275,7 +1278,7 @@ local function ShowHelp()
     cmd("/aom fav snapshot", "this character: make everything (non-grey) in your bags right now your favorites, replacing the old list. While you have favorites, every other item is unwanted: bags put it in one run right before the greys at the far end. Favorites get a line in their tooltip." .. now(FavCount() .. " favorite(s)"))
     cmd("/aom fav add|remove <item>", "add or remove favorites: shift-click items into the command, or type item IDs. Several at once is fine.")
     cmd("/aom fav list|clear", "show your favorites, or remove them all (bags are then arranged as usual).")
-    cmd("/aom auto on|off", "arrange your bags by themselves after they change, once you are idle: out of combat, not looting or casting, nothing on the cursor, and no vendor, bank, mail, trade or auction window open. If you get busy mid-run it stops and tries again later." .. now(onoff(db.auto)))
+    cmd("/aom auto on|off", "arrange your bags by themselves after they change, once you are idle: alive, out of combat, not looting or casting, nothing on the cursor, and no vendor, bank, mail, trade or auction window open. If you get busy mid-run it stops and tries again later." .. now(onoff(db.auto)))
     cmd("/aom delay <seconds>", "how long you must be idle before auto mode arranges, 1-" .. MAX_AUTO_DELAY .. "." .. now((db.autoDelay or AUTO_DELAY) .. "s"))
     line("  Long form: /arrangeomatic.")
 end
