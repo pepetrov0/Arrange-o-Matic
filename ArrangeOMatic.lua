@@ -10,8 +10,8 @@ ArrangeOMatic - WotLK 3.3.5a
   /aom ui               show the current setting
   /aom columns <n>      set the number of grid columns (saved; "ui single" only)
   /aom columns          show the current value
-  /aom groups subtype   group single items by type AND subtype (default)
-  /aom groups type      group single items by broad type only
+  /aom groups type      group single items by broad type only (default)
+  /aom groups subtype   group single items by type AND subtype
   /aom pack on|off      combine partial stacks of the same item first (default on)
   /aom trash on|off     gather grey items at the far end of your bags (default on)
   /aom fav snapshot     make everything in your bags now your favorites (per character)
@@ -64,8 +64,8 @@ Model
     default mode (spilling into bag 1 if the backpack runs out).
   * Favorites (bags only, per character, /aom fav): if you have any, every
     non-grey item that is not a favorite is unwanted and goes in a second
-    unbroken run right before the greys. No favorites: arranged as before.
-    Needs /aom trash on, like the greys.
+    unbroken run right before the greys, sorted by category, then itemID.
+    No favorites: arranged as before. Needs /aom trash on, like the greys.
   * The guild bank window is 14 columns x 7 rows, numbered column by column, so
     for /aom gbank the grid "width" is fixed at 7 (one model row = one window
     column, drawn transposed, which keeps clusters square in the window). The
@@ -155,13 +155,13 @@ end
 -- Scanning
 ---------------------------------------------------------------------------
 
--- The grouping key for single-stack items. By default it is "type/subtype"
--- (e.g. "Consumable/Potion", "Armor/Plate", "Trade Goods/Herb"); /aom groups type
--- switches to the broad type only. Edit this if you want a different notion.
+-- The grouping key for single-stack items. By default it is the broad type
+-- (e.g. "Consumable", "Armor"); /aom groups subtype switches to "type/subtype"
+-- (e.g. "Consumable/Potion", "Armor/Plate", "Trade Goods/Herb"). Edit this if you want a different notion.
 local function GetCategory(link)
     local _, _, _, _, _, itemType, subType = GetItemInfo(link)
     itemType = itemType or "Unknown"
-    if ArrangeOMaticDB and ArrangeOMaticDB.subtypes == false then return itemType end
+    if not (ArrangeOMaticDB and ArrangeOMaticDB.subtypes) then return itemType end
     return itemType .. "/" .. (subType or "")
 end
 
@@ -749,7 +749,8 @@ end
 -- sinkTrash: grey items go, as one run of consecutive cells, to the very end of
 -- the fill order - the opposite end from the Hearthstone.
 -- favs: optional set of favorite itemIDs. With sinkTrash, every other non-grey
--- item is unwanted and goes in a second run right before the greys.
+-- item is unwanted and goes in a second run right before the greys, sorted by
+-- category, then itemID.
 local function BuildMoves(S, items, layout, pinHearthstone, sinkTrash, favs)
     if type(layout) == "number" then layout = SingleWindowLayout(S, layout) end
 
@@ -857,7 +858,19 @@ local function BuildMoves(S, items, layout, pinHearthstone, sinkTrash, favs)
         end
     end
     Assign(dest, trash, trashCells)
-    Assign(dest, unwanted, unwantedCells)
+    -- Unwanted items are sorted by category, then itemID, in fill order
+    -- (unwantedCells runs backwards from the greys). Same-ID stacks trade
+    -- destinations below, so ties cost no moves.
+    local nU = #unwanted
+    if nU > 0 then
+        table.sort(unwanted, function(a, b)
+            local x, y = items[a], items[b]
+            if x.cat ~= y.cat then return x.cat < y.cat end
+            if x.id ~= y.id then return x.id < y.id end
+            return a < b
+        end)
+        for k = 1, nU do dest[unwanted[k]] = unwantedCells[nU - k + 1] end
+    end
     if hsV then dest[hsV] = pinV end
     for tok, d in pairs(dest) do want[d] = tok end
 
@@ -1117,7 +1130,7 @@ frame:SetScript("OnEvent", function(self, event, name)
         if name == "ArrangeOMatic" then
             ArrangeOMaticDB = ArrangeOMaticDB or {}
             ArrangeOMaticDB.columns = tonumber(ArrangeOMaticDB.columns) or DEFAULT_COLUMNS
-            if ArrangeOMaticDB.subtypes == nil then ArrangeOMaticDB.subtypes = true end
+            ArrangeOMaticDB.subtypes = ArrangeOMaticDB.subtypes and true or false
             if ArrangeOMaticDB.pack == nil then ArrangeOMaticDB.pack = true end
             if ArrangeOMaticDB.trash == nil then ArrangeOMaticDB.trash = true end
             if ArrangeOMaticDB.ui ~= "single" then ArrangeOMaticDB.ui = "default" end
@@ -1256,7 +1269,7 @@ local function ShowHelp()
     line(W .. "Settings (saved per account; leave out the value to see the current one)" .. R)
     cmd("/aom ui default|single", "default: each Blizzard bag window is its own grid, and the last bag fills first so the backpack keeps the free space. single: all bags as ONE grid, for one-window bag addons." .. now(GetUI()))
     cmd("/aom columns <n>", "width of that one grid, 1-" .. MAX_COLUMNS .. ". Only used with ui single - Blizzard's windows have a fixed width." .. now(GetColumns()))
-    cmd("/aom groups subtype|type", "subtype: group single stacks by type AND subtype (Consumable/Potion, Armor/Plate...). type: by broad type only (Consumable, Armor...)." .. now(db.subtypes == false and "type" or "subtype"))
+    cmd("/aom groups type|subtype", "type (default): group single stacks by broad type only (Consumable, Armor...). subtype: by type AND subtype (Consumable/Potion, Armor/Plate...)." .. now(db.subtypes and "subtype" or "type"))
     cmd("/aom pack on|off", "before arranging, combine partial stacks of the same item, leaving at most one partial stack each." .. now(onoff(db.pack ~= false)))
     cmd("/aom trash on|off", "bags only: put grey items in one unbroken run at the far end, opposite the Hearthstone - easy to find at a vendor." .. now(onoff(db.trash ~= false)))
     cmd("/aom fav snapshot", "this character: make everything (non-grey) in your bags right now your favorites, replacing the old list. While you have favorites, every other item is unwanted: bags put it in one run right before the greys at the far end. Favorites get a line in their tooltip." .. now(FavCount() .. " favorite(s)"))
@@ -1306,7 +1319,7 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
             ArrangeOMaticDB.subtypes = true
             Print("grouping single items by type and subtype.")
         else
-            Print("groups = " .. (ArrangeOMaticDB.subtypes == false and "type" or "subtype")
+            Print("groups = " .. (ArrangeOMaticDB.subtypes and "subtype" or "type")
                   .. "  (use /aom groups type|subtype)")
         end
     elseif cmd == "pack" or cmd == "merge" or cmd == "stacks" then
