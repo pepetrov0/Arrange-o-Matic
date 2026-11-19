@@ -116,8 +116,8 @@ local TICK    = 0.05       -- seconds between steps
 local TIMEOUT = 8          -- seconds to wait for the server before giving up
 
 -- Auto mode (/aom auto): after the bags change, wait until the player has been
--- idle (alive, no combat, looting, vendor/bank/mail/trade window, casting, item
--- on the cursor...) for the delay (/aom delay, default AUTO_DELAY seconds), then
+-- idle (alive, no combat, looting, bags or vendor/bank/mail/trade window open,
+-- casting, item on the cursor...) for the delay (/aom delay, default AUTO_DELAY seconds), then
 -- arrange the bags.
 local AUTO_DELAY     = 5
 local MAX_AUTO_DELAY = 60
@@ -915,6 +915,25 @@ local autoDirty, lastBusy, lootOpen = false, 0, false
 
 local function Shown(f) return f and f:IsShown() end
 
+-- Bag windows: Blizzard's, ElvUI's and those of common bag addons.
+local BAG_FRAMES = { "ElvUI_ContainerFrame", "BagnonFrameinventory", "ARKINV_Frame1",
+                     "AdiBagsContainer1", "CombuctorFrame1" }
+
+local function BagsOpen()
+    for i = 1, NUM_CONTAINER_FRAMES or 13 do
+        if Shown(_G["ContainerFrame" .. i]) then return true end
+    end
+    for _, name in ipairs(BAG_FRAMES) do
+        if Shown(_G[name]) then return true end
+    end
+    return false
+end
+
+-- Other windows where the player moves, equips, uses or hands in items.
+local INVENTORY_FRAMES = { "MerchantFrame", "TradeFrame", "MailFrame", "AuctionFrame",
+                           "StackSplitFrame", "CharacterFrame", "TradeSkillFrame",
+                           "ItemSocketingFrame", "QuestFrame", "GossipFrame" }
+
 -- Is the player doing something an arrangement would get in the way of?
 -- ignoreCursor: the executor itself puts items on the cursor while it runs.
 local function PlayerBusy(ignoreCursor)
@@ -923,20 +942,138 @@ local function PlayerBusy(ignoreCursor)
     if not ignoreCursor and CursorHasItem() then return true end
     if SpellIsTargeting() or UnitCastingInfo("player") or UnitChannelInfo("player") then return true end
     if lootOpen or Shown(LootFrame) or IsBankOpen() or IsGuildBankOpen() then return true end
-    return Shown(MerchantFrame) or Shown(TradeFrame) or Shown(MailFrame) or Shown(AuctionFrame)
-        or Shown(StackSplitFrame) or false
+    for i = 1, NUM_GROUP_LOOT_FRAMES or 4 do   -- need/greed rolls
+        if Shown(_G["GroupLootFrame" .. i]) then return true end
+    end
+    for _, name in ipairs(INVENTORY_FRAMES) do
+        if Shown(_G[name]) then return true end
+    end
+    return BagsOpen()
 end
 
-local function Finish(msg)
+-- Progress dialog: a click-through box centered at 2/3 screen height with a
+-- title and a progress bar while sorting; when the run ends it shows the final
+-- report for a few seconds, then fades out. Skinned to match ElvUI if loaded.
+local DIALOG_WIDTH = 300
+local DIALOG_HOLD  = 2.5   -- seconds the final report stays up
+local DIALOG_FADE  = 0.5
+local dialog
+
+local function SkinDialog(d)
+    local E = ElvUI and unpack(ElvUI)
+    if E and d.SetTemplate and E.media and E.media.normTex then
+        d:SetTemplate("Transparent")
+        d.bar:CreateBackdrop("Transparent")
+        d.bar:SetStatusBarTexture(E.media.normTex)
+        if E.RegisterStatusBar then E:RegisterStatusBar(d.bar) end
+        for _, fs in ipairs({ d.title, d.barText, d.report }) do
+            if fs.FontTemplate then fs:FontTemplate() end
+        end
+        return
+    end
+    d:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    d:SetBackdropColor(0, 0, 0, 0.85)
+    d:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+    d.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    local bg = d.bar:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetTexture(0, 0, 0, 0.5)
+end
+
+local function GetDialog()
+    if dialog then return dialog end
+    local d = CreateFrame("Frame", "ArrangeOMaticProgress", UIParent)
+    d:SetWidth(DIALOG_WIDTH)
+    d:SetFrameStrata("HIGH")
+    d:EnableMouse(false)   -- click-through
+    d:Hide()
+
+    d.title = d:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    d.title:SetPoint("TOP", 0, -10)
+
+    d.bar = CreateFrame("StatusBar", nil, d)
+    d.bar:SetPoint("TOPLEFT", 12, -30)
+    d.bar:SetPoint("TOPRIGHT", -12, -30)
+    d.bar:SetHeight(14)
+    d.bar:EnableMouse(false)
+    d.barText = d.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    d.barText:SetPoint("CENTER")
+
+    d.report = d:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    d.report:SetPoint("TOP", 0, -30)
+    d.report:SetJustifyH("CENTER")
+
+    SkinDialog(d)
+    d.bar:SetStatusBarColor(0.2, 1, 0.6)
+
+    d:SetScript("OnUpdate", function(self, elapsed)
+        if not self.hold then return end
+        self.hold = self.hold - elapsed
+        if self.hold > 0 then return end
+        if self.hold <= -DIALOG_FADE then
+            self.hold = nil
+            self:SetAlpha(1)
+            return self:Hide()
+        end
+        self:SetAlpha(1 + self.hold / DIALOG_FADE)
+    end)
+    dialog = d
+    return d
+end
+
+local function DialogStart(total)
+    local d = GetDialog()
+    d.hold = nil
+    d:SetAlpha(1)
+    d.title:SetText("Arrange-o-Matic: Sorting")
+    d.report:Hide()
+    d.bar:SetMinMaxValues(0, total)
+    d.bar:Show()
+    -- Centered horizontally, at 2/3 of the screen height from the bottom
+    -- (re-anchored each run in case the UI scale changed).
+    d:ClearAllPoints()
+    d:SetPoint("CENTER", UIParent, "BOTTOM", 0, UIParent:GetHeight() * 2 / 3)
+    d:SetWidth(DIALOG_WIDTH)
+    d:SetHeight(54)
+    d:Show()
+end
+
+local function DialogProgress(done, total)
+    if not dialog then return end
+    dialog.bar:SetValue(done)
+    dialog.barText:SetText(done .. " / " .. total)
+end
+
+local function DialogReport(title, msg)
+    local d = GetDialog()
+    d.title:SetText("Arrange-o-Matic: " .. title)
+    d.bar:Hide()
+    d.report:SetText(msg)
+    d.report:Show()
+    -- One line per fact; grow the box rather than let a long line wrap.
+    d:SetWidth(math.max(DIALOG_WIDTH, d.report:GetStringWidth() + 24))
+    d:SetHeight(42 + d.report:GetStringHeight())
+    d:SetAlpha(1)
+    d:Show()
+    d.hold = DIALOG_HOLD
+end
+
+local function Finish(title, msg)
     frame:SetScript("OnUpdate", nil)
     job = nil
-    if msg then Print(msg) end
+    if title then DialogReport(title, msg) end
 end
 
 local function Abort(reason)
     ClearCursor()
     if job and job.auto then autoDirty, lastBusy = true, GetTime() end   -- try again once idle
-    Finish("stopped - " .. reason)
+    Print("stopped - " .. reason)   -- also keep it in chat
+    Finish("|cffff5555Stopped|r", reason)
 end
 
 local function Step(self, elapsed)
@@ -953,7 +1090,7 @@ local function Step(self, elapsed)
     end
 
     local m = job.moves[job.idx]
-    if not m then return Finish("done.") end
+    if not m then return Finish(job.title, job.report) end
     local A, B = job.slots[m.a], job.slots[m.b]
 
     if job.phase == "issue" then
@@ -988,7 +1125,7 @@ local function Step(self, elapsed)
         -- mismatch here just means "not updated yet": keep polling until TIMEOUT.
         if SigAt(api, A) ~= m.postA or SigAt(api, B) ~= m.postB then return end
         job.idx, job.phase, job.waited = job.idx + 1, "issue", 0
-        if job.idx % 25 == 0 then Print(job.idx .. "/" .. #job.moves .. " moves") end
+        DialogProgress(job.idx - 1, #job.moves)
     end
 end
 
@@ -1081,15 +1218,18 @@ local function Start(mode, auto)
     moves = soulMoves
     if auto and #moves == 0 then return end
     local split = stats.pure + stats.flood
-    if split > 0 then
-        Print(string.format("note: not enough free room to keep %d cluster(s) as solid blocks.", split))
-    end
-    if #moves == 0 then return Print(label .. " already arranged.") end
+    local note = split > 0
+        and string.format("\n|cffffd100%d cluster(s) split up:\nnot enough free room for solid blocks|r", split) or ""
+    if #moves == 0 then return Print(label .. " already arranged." .. note:gsub("\n", " ")) end
 
-    Print(string.format("%s: %d slots, %s, %d clusters, %d moves (%d stack merges, %d to soul bags)...",
-                        label, S, shape, nClusters, #moves, nMerges, nSoul))
-    job = { api = api, slots = slots, moves = moves, check = check, auto = auto,
+    local title = (mode == "gbank" and ("Guild Bank Tab " .. GetCurrentGuildBankTab())
+                   or mode == "bank" and "Bank" or "Bags") .. " Arranged"
+    local report = string.format("%d moves\n%d stack merges, %d to soul bags\n%d slots, %s, %d clusters%s",
+                                 #moves, nMerges, nSoul, S, shape, nClusters, note)
+    job = { api = api, slots = slots, moves = moves, check = check, auto = auto, title = title, report = report,
             idx = 1, phase = "issue", acc = 0, waited = 0 }
+    DialogStart(#moves)
+    DialogProgress(0, #moves)
     frame:SetScript("OnUpdate", Step)
 end
 
@@ -1278,7 +1418,7 @@ local function ShowHelp()
     cmd("/aom fav snapshot", "this character: make everything (non-grey) in your bags right now your favorites, replacing the old list. While you have favorites, every other item is unwanted: bags put it in one run right before the greys at the far end. Favorites get a line in their tooltip." .. now(FavCount() .. " favorite(s)"))
     cmd("/aom fav add|remove <item>", "add or remove favorites: shift-click items into the command, or type item IDs. Several at once is fine.")
     cmd("/aom fav list|clear", "show your favorites, or remove them all (bags are then arranged as usual).")
-    cmd("/aom auto on|off", "arrange your bags by themselves after they change, once you are idle: alive, out of combat, not looting or casting, nothing on the cursor, and no vendor, bank, mail, trade or auction window open. If you get busy mid-run it stops and tries again later." .. now(onoff(db.auto)))
+    cmd("/aom auto on|off", "arrange your bags by themselves after they change, once you are idle: alive, out of combat, not looting or casting, nothing on the cursor, your bags closed, and no vendor, bank, mail, trade, auction, NPC, quest, character, crafting or socketing window open. If you get busy mid-run it stops and tries again later." .. now(onoff(db.auto)))
     cmd("/aom delay <seconds>", "how long you must be idle before auto mode arranges, 1-" .. MAX_AUTO_DELAY .. "." .. now((db.autoDelay or AUTO_DELAY) .. "s"))
     line("  Long form: /arrangeomatic.")
 end

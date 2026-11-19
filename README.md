@@ -7,7 +7,7 @@
 *Packs and clusters your bag items into tidy grid blocks — bags, bank and guild bank, laid out the way your bag windows actually look.*
 
 ![World of Warcraft WotLK 3.3.5a](https://img.shields.io/static/v1?style=flat-square&label=WoW&message=WotLK%203.3.5a&color=a335ee)
-![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.8.0&color=2ea043)
+![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.9.0&color=2ea043)
 ![Lua 5.1](https://img.shields.io/static/v1?style=flat-square&label=Lua&message=5.1&color=000080)
 
 ⭐ If you find this addon useful, star it on GitHub — it helps others discover it!
@@ -34,7 +34,7 @@ Arrange-o-Matic is a lightweight organizer addon for the Wrath of the Lich King 
 - **Soul Shards to soul bags** – Soul Shards in your regular bags are moved into free slots of your soul bags first (bags and bank); any that don't fit are arranged with everything else.
 - **Trash at the far end** – when arranging your bags, grey (poor-quality) items are pulled out of their groups and packed into one unbroken run of slots at the opposite end from the Hearthstone: the bottom-right of the backpack, running leftwards and upwards (spilling into bag 1 if needed) with the default UI, or slot 1 onwards — the bottom-right of the combined grid — with a single-window bag addon. Easy to find at a vendor. `/aom trash off` turns it off (on by default).
 - **Favorites** – per character. `/aom fav snapshot` makes everything (non-grey) in your bags right now your favorites; `/aom fav add`/`remove` adjust the list (shift-click items into the command). While you have any favorites, every other item counts as unwanted: when arranging your bags it goes in one unbroken run right before the greys, sorted by category and then by item, so the far end reads greys → unwanted → (free space and) your favorites. With no favorites, bags are arranged as before. Favorite items get an "Arrange-o-Matic: favorite" line in their tooltip.
-- **Auto-arrange** – `/aom auto on` arranges your bags by itself a few seconds after they change once you are idle: alive, out of combat, no loot window, no vendor/bank/guild bank/mail/trade/auction window open, not casting, nothing on the cursor. If you get busy mid-run it stops and tries again later. Off by default; `/aom delay <seconds>` sets how long you must be idle first (default 5).
+- **Auto-arrange** – `/aom auto on` arranges your bags by itself a few seconds after they change once you are idle: alive, out of combat, bags closed, no loot window or loot roll, no vendor/bank/guild bank/mail/trade/auction/NPC/quest/character/crafting/socketing window open, not casting, nothing on the cursor. If you get busy mid-run it stops and tries again later. Off by default; `/aom delay <seconds>` sets how long you must be idle first (default 5).
 - **Safe execution** – every move, arrangement move or stack merge alike, is verified before and after; the run aborts cleanly if something changes mid-sort instead of shuffling items around. Cancel any time with `/aom stop`.
 - **Saved settings** – window mode, grid width, grouping, stack-packing, trash and auto settings are stored per account; favorites per character.
 
@@ -78,16 +78,17 @@ Type in any chat input:
 | `/aom delay <seconds>` | How long you must be idle before auto mode arranges your bags, 1–60 (default 5) — `/aom delay` alone shows the current value |
 | `/aom stop` | Cancel an arrangement in progress |
 
-Example session (with the default `ui` setting):
+While sorting, nothing is printed to chat: a small click-through dialog centered horizontally at two-thirds of the screen height shows **Arrange-o-Matic: Sorting** with a progress bar (skinned to match ElvUI when it is loaded). When the run ends, the dialog shows the final report for a few seconds and fades out, e.g. (with the default `ui` setting):
 
 ```text
-/aom
-Arrange-o-Matic: bags: 80 slots, 5 bag windows, 21 clusters, 36 moves (4 stack merges)...
-Arrange-o-Matic: 25/36 moves
-Arrange-o-Matic: done.
+Arrange-o-Matic: Bags Arranged
+
+36 moves
+4 stack merges, 0 to soul bags
+80 slots, 5 bag windows, 21 clusters
 ```
 
-(In `ui single` the same line reports the combined grid instead, e.g. `bags: 80 slots, 10 columns, ...`.) The figure in parentheses is how many partial stacks it will merge first; with `/aom pack off` it reads `(0 stack merges)`.
+(In `ui single` the report shows the combined grid instead, e.g. `80 slots, 10 columns, ...`.) If a run is stopped, the title reads **Arrange-o-Matic: Stopped** with the reason below it and also printed to chat. The figure in parentheses is how many partial stacks it will merge first; with `/aom pack off` it reads `(0 stack merges)`.
 
 > [!NOTE]
 > Stack packing needs an item's maximum stack size, which the client only knows once it has seen that item. Items whose info hasn't been cached yet are left untouched for that run — run `/aom` again and they're packed too.
@@ -122,7 +123,7 @@ bag 2 — the last bag, filled first    bag 1                 backpack — loot 
 
 *(A real layout produced by the planner in `ui default`, three bags shown in fill order — last bag first. The Hearthstone is pinned to the top-left cell of the last bag; the largest clusters take it and the remaining bags in turn, and the backpack ends up empty: that's where new loot lands.)*
 
-The plan depends only on the item counts — never on where the items currently sit — so running the command again on an already-arranged set of bags makes no moves at all. The layout is turned into a short list of two-slot swaps, executed a few per second through the standard pickup API, each verified before and after: two stacks of the same itemID are never swapped directly (the game would merge them) — they trade destinations instead. If the contents change while sorting, an item lock never clears, or the window is closed, the run aborts with a chat message — run the command again and it finishes the job. A cluster that can't sit in a window as one solid block is split as compactly as possible, with a chat note.
+The plan depends only on the item counts — never on where the items currently sit — so running the command again on an already-arranged set of bags makes no moves at all. The layout is turned into a short list of two-slot swaps, executed a few per second through the standard pickup API, each verified before and after: two stacks of the same itemID are never swapped directly (the game would merge them) — they trade destinations instead. If the contents change while sorting, an item lock never clears, or the window is closed, the run aborts with a chat message — run the command again and it finishes the job. A cluster that can't sit in a window as one solid block is split as compactly as possible, with a note in the final report.
 
 Guild bank tabs are drawn column by column (14 columns × 7 rows in 3.3.5a), so `/aom gbank` always uses a fixed 7-column grid, whatever your settings say.
 
