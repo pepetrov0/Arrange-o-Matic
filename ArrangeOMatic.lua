@@ -118,7 +118,8 @@ local TIMEOUT = 8          -- seconds to wait for the server before giving up
 -- Auto mode (/aom auto): after the bags change, wait until the player has been
 -- idle (alive, no combat, looting, bags or vendor/bank/mail/trade window open,
 -- casting, item on the cursor...) for the delay (/aom delay, default AUTO_DELAY seconds), then
--- arrange the bags.
+-- arrange the bags. Once a run has started, only death, a grabbed item or a
+-- window where a misclick could cost items (vendor, mail, loot...) stops it.
 local AUTO_DELAY     = 5
 local MAX_AUTO_DELAY = 60
 local AUTO_POLL  = 0.5
@@ -935,12 +936,17 @@ local INVENTORY_FRAMES = { "MerchantFrame", "TradeFrame", "MailFrame", "AuctionF
                            "ItemSocketingFrame", "QuestFrame", "GossipFrame" }
 
 -- Is the player doing something an arrangement would get in the way of?
--- ignoreCursor: the executor itself puts items on the cursor while it runs.
-local function PlayerBusy(ignoreCursor)
+-- running: an arrangement is already under way. Combat, casting and open bags
+-- no longer matter then (moving bag items is harmless for them), and the cursor
+-- is skipped because the executor itself puts items there (Step checks it).
+local function PlayerBusy(running)
     if UnitIsDeadOrGhost("player") then return true end   -- items can't be moved while dead
-    if InCombatLockdown() or UnitAffectingCombat("player") then return true end
-    if not ignoreCursor and CursorHasItem() then return true end
-    if SpellIsTargeting() or UnitCastingInfo("player") or UnitChannelInfo("player") then return true end
+    if not running then
+        if InCombatLockdown() or UnitAffectingCombat("player") then return true end
+        if CursorHasItem() then return true end
+        if UnitCastingInfo("player") or UnitChannelInfo("player") then return true end
+    end
+    if SpellIsTargeting() then return true end
     if lootOpen or Shown(LootFrame) or IsBankOpen() or IsGuildBankOpen() then return true end
     for i = 1, NUM_GROUP_LOOT_FRAMES or 4 do   -- need/greed rolls
         if Shown(_G["GroupLootFrame" .. i]) then return true end
@@ -948,7 +954,7 @@ local function PlayerBusy(ignoreCursor)
     for _, name in ipairs(INVENTORY_FRAMES) do
         if Shown(_G[name]) then return true end
     end
-    return BagsOpen()
+    return not running and BagsOpen()
 end
 
 -- Progress dialog: a click-through box centered at 2/3 screen height with a
@@ -1418,7 +1424,7 @@ local function ShowHelp()
     cmd("/aom fav snapshot", "this character: make everything (non-grey) in your bags right now your favorites, replacing the old list. While you have favorites, every other item is unwanted: bags put it in one run right before the greys at the far end. Favorites get a line in their tooltip." .. now(FavCount() .. " favorite(s)"))
     cmd("/aom fav add|remove <item>", "add or remove favorites: shift-click items into the command, or type item IDs. Several at once is fine.")
     cmd("/aom fav list|clear", "show your favorites, or remove them all (bags are then arranged as usual).")
-    cmd("/aom auto on|off", "arrange your bags by themselves after they change, once you are idle: alive, out of combat, not looting or casting, nothing on the cursor, your bags closed, and no vendor, bank, mail, trade, auction, NPC, quest, character, crafting or socketing window open. If you get busy mid-run it stops and tries again later." .. now(onoff(db.auto)))
+    cmd("/aom auto on|off", "arrange your bags by themselves after they change, once you are idle: alive, out of combat, not looting or casting, nothing on the cursor, your bags closed, and no vendor, bank, mail, trade, auction, NPC, quest, character, crafting or socketing window open. Once a run has started, combat, casting and opening your bags no longer stop it; dying, picking up an item or opening a vendor, bank, mail, trade, loot or similar window does, and it tries again later." .. now(onoff(db.auto)))
     cmd("/aom delay <seconds>", "how long you must be idle before auto mode arranges, 1-" .. MAX_AUTO_DELAY .. "." .. now((db.autoDelay or AUTO_DELAY) .. "s"))
     line("  Long form: /arrangeomatic.")
 end
