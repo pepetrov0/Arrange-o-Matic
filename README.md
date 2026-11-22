@@ -7,7 +7,7 @@
 *Packs and clusters your bag items into tidy grid blocks — bags, bank and guild bank, laid out the way your bag windows actually look.*
 
 ![World of Warcraft WotLK 3.3.5a](https://img.shields.io/static/v1?style=flat-square&label=WoW&message=WotLK%203.3.5a&color=a335ee)
-![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.13.0&color=2ea043)
+![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.13.1&color=2ea043)
 ![Lua 5.1](https://img.shields.io/static/v1?style=flat-square&label=Lua&message=5.1&color=000080)
 
 ⭐ If you find this addon useful, star it on GitHub — it helps others discover it!

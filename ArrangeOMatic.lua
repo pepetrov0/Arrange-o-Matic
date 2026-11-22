@@ -1481,7 +1481,7 @@ end
 local TB_SIZE, TB_PAD, TB_GAP, TB_HEAD = 40, 6, 6, 20
 local TB_ICONS  = "Interface\\Icons\\"
 local STOP_ICON = "Interface\\Buttons\\UI-StopButton"
-local toolbox, tbSig, tbButtons, tbMenu
+local toolbox, tbSig, tbButtons, tbMenu, tbMenuClosed
 
 local function DBFlag(key, default)
     local v = ArrangeOMaticDB[key]
@@ -1773,7 +1773,14 @@ end
 OpenMenu = function(anchor)
     if not tbMenu then
         tbMenu = CreateFrame("Frame", "ArrangeOMaticMenu", UIParent, "UIDropDownMenuTemplate")
+        DropDownList1:HookScript("OnHide", function() tbMenuClosed = GetTime() end)
     end
+    -- A click on the gear while the menu is open closes it. (The click itself
+    -- already closes the list before we get here, so also catch that.)
+    if DropDownList1:IsShown() and UIDROPDOWNMENU_OPEN_MENU == tbMenu then
+        return CloseDropDownMenus()
+    end
+    if tbMenuClosed and GetTime() - tbMenuClosed < 0.25 then return end
     UIDropDownMenu_Initialize(tbMenu, MenuInit, "MENU")
     ToggleDropDownMenu(1, nil, tbMenu, anchor, 0, 0)
 end
