@@ -940,21 +940,22 @@ local INVENTORY_FRAMES = { "MerchantFrame", "TradeFrame", "MailFrame", "AuctionF
 -- no longer matter then (moving bag items is harmless for them), and the cursor
 -- is skipped because the executor itself puts items there (Step checks it).
 local function PlayerBusy(running)
-    if UnitIsDeadOrGhost("player") then return true end   -- items can't be moved while dead
+    if UnitIsDeadOrGhost("player") then return "You died." end   -- items can't be moved while dead
     if not running then
-        if InCombatLockdown() or UnitAffectingCombat("player") then return true end
-        if CursorHasItem() then return true end
-        if UnitCastingInfo("player") or UnitChannelInfo("player") then return true end
+        if InCombatLockdown() or UnitAffectingCombat("player") then return "You are in combat." end
+        if GetCursorInfo() then return "Your cursor is holding something." end
+        if UnitCastingInfo("player") or UnitChannelInfo("player") then return "You are casting." end
     end
-    if SpellIsTargeting() then return true end
-    if lootOpen or Shown(LootFrame) or IsBankOpen() or IsGuildBankOpen() then return true end
+    if SpellIsTargeting() then return "You are choosing a spell target." end
+    if lootOpen or Shown(LootFrame) then return "You opened a loot window." end
+    if IsBankOpen() or IsGuildBankOpen() then return "You opened a bank." end
     for i = 1, NUM_GROUP_LOOT_FRAMES or 4 do   -- need/greed rolls
-        if Shown(_G["GroupLootFrame" .. i]) then return true end
+        if Shown(_G["GroupLootFrame" .. i]) then return "A loot roll appeared." end
     end
     for _, name in ipairs(INVENTORY_FRAMES) do
-        if Shown(_G[name]) then return true end
+        if Shown(_G[name]) then return "You opened another window (" .. name:gsub("Frame$", "") .. ")." end
     end
-    return not running and BagsOpen()
+    if not running and BagsOpen() then return "Your bags are open." end
 end
 
 -- Progress dialog: a click-through box centered at 2/3 screen height with a
@@ -1076,10 +1077,12 @@ local function Finish(title, msg)
 end
 
 local function Abort(reason)
-    ClearCursor()
+    if CursorHasItem() then ClearCursor() end   -- never wipe a spell/macro the player picked up
     if job and job.auto then autoDirty, lastBusy = true, GetTime() end   -- try again once idle
-    Print("stopped - " .. reason)   -- also keep it in chat
-    Finish("|cffff5555Stopped|r", reason)
+    local done = job and math.max(job.idx - 1, 0)
+    local progress = job and done > 0 and string.format("\n%d of %d moves were done.", done, #job.moves) or ""
+    Print("Sorting stopped. " .. reason)   -- also keep it in chat
+    Finish("|cffff5555Sorting stopped|r", reason .. progress)
 end
 
 local function Step(self, elapsed)
@@ -1089,7 +1092,7 @@ local function Step(self, elapsed)
     job.acc = 0
 
     local api = job.api
-    if UnitIsDeadOrGhost("player") then return Abort("you died.") end
+    if UnitIsDeadOrGhost("player") then return Abort("You died.") end
     if job.check then
         local problem = job.check()
         if problem then return Abort(problem) end
@@ -1100,14 +1103,16 @@ local function Step(self, elapsed)
     local A, B = job.slots[m.a], job.slots[m.b]
 
     if job.phase == "issue" then
-        if CursorHasItem() then return Abort("your cursor is holding something.") end
+        -- The player grabbed a spell/macro/item: picking up a bag item would
+        -- replace it, so stop and leave the cursor alone (Abort only clears items).
+        if GetCursorInfo() then return Abort("You picked something up with the mouse.") end
         if IsLocked(api, A) or IsLocked(api, B) then
             job.waited = job.waited + dt
-            if job.waited > TIMEOUT then return Abort("timed out waiting for an item lock.") end
+            if job.waited > TIMEOUT then return Abort("An item stayed locked for too long. The server may be lagging.") end
             return
         end
         if SigAt(api, A) ~= m.preA or SigAt(api, B) ~= m.preB then
-            return Abort("the contents changed while sorting. Run it again.")
+            return Abort("Your items changed while sorting (something was looted, used or moved). Run it again.")
         end
         api.pickup(A)
         api.pickup(B)
@@ -1115,7 +1120,7 @@ local function Step(self, elapsed)
     else
         job.waited = job.waited + dt
         if job.waited > TIMEOUT then
-            return Abort("the move never showed up (missing permission, or the server is lagging). Run it again.")
+            return Abort("The server did not confirm a move (lag or missing permission). Run it again.")
         end
 
         if CursorHasItem() then
@@ -1139,32 +1144,32 @@ end
 -- auto: started by auto mode - stop if the player gets busy, and say nothing
 -- if there is nothing to do (the bags change all the time).
 local function Start(mode, auto)
-    if job then return Print("already running (/aom stop to cancel).") end
-    if UnitIsDeadOrGhost("player") then return Print("you can't move items while dead.") end
-    if CursorHasItem() then return Print("empty your cursor first.") end
+    if job then return Print("Already running (/aom stop to cancel).") end
+    if UnitIsDeadOrGhost("player") then return Print("You can't move items while dead.") end
+    if GetCursorInfo() then return Print("Empty your cursor first.") end
 
     local api, slots, items, groups, soulFree, layout, pin, check, label, shape
     local separate = (GetUI() == "default")
     if mode == "bank" then
-        if not IsBankOpen() then return Print("open your bank first.") end
+        if not IsBankOpen() then return Print("Open your bank first.") end
         api, label = BagAPI, "bank"
         slots, items, groups, soulFree = ScanBags(BankBagIds())
-        check = function() if not IsBankOpen() then return "the bank was closed." end end
+        check = function() if not IsBankOpen() then return "You closed the bank." end end
     elseif mode == "gbank" then
-        if not IsGuildBankOpen() then return Print("open your guild bank first.") end
+        if not IsGuildBankOpen() then return Print("Open your guild bank first.") end
         local tab = GetCurrentGuildBankTab()
-        if not tab or tab < 1 then return Print("select a guild bank tab first.") end
+        if not tab or tab < 1 then return Print("Select a guild bank tab first.") end
         local name, _, isViewable, canDeposit = GetGuildBankTabInfo(tab)
-        if not isViewable then return Print("you can't view this tab.") end
-        if not canDeposit then Print("warning: you may lack deposit rights on this tab; moves can fail.") end
+        if not isViewable then return Print("You can't view this tab.") end
+        if not canDeposit then Print("Warning: you may lack deposit rights on this tab; moves can fail.") end
         api, label = GuildAPI, "guild bank tab " .. tab .. (name and (" (" .. name .. ")") or "")
         slots, items = ScanGuildTab(tab)
         separate = false   -- the guild bank is one Blizzard window either way
         layout = SingleWindowLayout(#slots, GBANK_COLUMN_H)
         shape = GBANK_COLUMN_H .. " columns"
         check = function()
-            if not IsGuildBankOpen() then return "the guild bank was closed." end
-            if GetCurrentGuildBankTab() ~= tab then return "the guild bank tab changed." end
+            if not IsGuildBankOpen() then return "You closed the guild bank." end
+            if GetCurrentGuildBankTab() ~= tab then return "You switched guild bank tab." end
         end
     else
         api, label, pin = BagAPI, "bags", true
@@ -1172,15 +1177,15 @@ local function Start(mode, auto)
     end
 
     local S = #slots
-    if S == 0 then return Print("no usable slots found.") end
-    if next(items) == nil then return Print("nothing to arrange.") end
+    if S == 0 then return Print("No usable slots found.") end
+    if next(items) == nil then return Print("Nothing to arrange.") end
     if auto then
         -- Item info not cached yet (e.g. right after login): grouping would be
         -- wrong, so wait for the next idle check instead.
         for v = 1, S do
             if items[v] and not items[v].stack then autoDirty, lastBusy = true, GetTime(); return end
         end
-        check = function() if PlayerBusy(true) then return "you got busy." end end
+        check = function() return PlayerBusy(true) end
     end
 
     if not layout then   -- bags and bank
@@ -1225,13 +1230,15 @@ local function Start(mode, auto)
     if auto and #moves == 0 then return end
     local split = stats.pure + stats.flood
     local note = split > 0
-        and string.format("\n|cffffd100%d cluster(s) split up:\nnot enough free room for solid blocks|r", split) or ""
+        and string.format("\n|cffffd100%d groups could not stay in one block:\nnot enough free room.|r", split) or ""
     if #moves == 0 then return Print(label .. " already arranged." .. note:gsub("\n", " ")) end
 
-    local title = (mode == "gbank" and ("Guild Bank Tab " .. GetCurrentGuildBankTab())
-                   or mode == "bank" and "Bank" or "Bags") .. " Arranged"
-    local report = string.format("%d moves\n%d stack merges, %d to soul bags\n%d slots, %s, %d clusters%s",
-                                 #moves, nMerges, nSoul, S, shape, nClusters, note)
+    local title = (mode == "gbank" and ("Guild bank tab " .. GetCurrentGuildBankTab())
+                   or mode == "bank" and "Bank" or "Bags") .. " sorted"
+    local report = string.format("Done in %d moves.", #moves)
+    if nMerges > 0 then report = report .. string.format("\n%d partial stacks combined.", nMerges) end
+    if nSoul > 0 then report = report .. string.format("\n%d soul shards moved to soul bags.", nSoul) end
+    report = report .. note
     job = { api = api, slots = slots, moves = moves, check = check, auto = auto, title = title, report = report,
             idx = 1, phase = "issue", acc = 0, waited = 0 }
     DialogStart(#moves)
@@ -1356,22 +1363,22 @@ local function FavCommand(arg, msg)
             for id in rest:gmatch("%d+") do ids[#ids + 1] = tonumber(id) end
         end
         if #ids == 0 then
-            return Print("shift-click one or more items into the command, e.g. /aom fav " .. (adding and "add" or "remove") .. " [Item], or give item IDs.")
+            return Print("Shift-click one or more items into the command, e.g. /aom fav " .. (adding and "add" or "remove") .. " [Item], or give item IDs.")
         end
         for _, id in ipairs(ids) do
             local name, link = GetItemInfo(id)
             local label = link or name or ("item " .. id)
             if adding then
                 favs[id] = name or favs[id] or true
-                Print("favorites + " .. label)
+                Print("Added to favorites: " .. label)
             elseif favs[id] then
                 favs[id] = nil
-                Print("favorites - " .. label)
+                Print("Removed from favorites: " .. label)
             else
                 Print(label .. " is not a favorite.")
             end
         end
-        if not next(favs) then Print("no favorites left: bags are arranged as usual again.") end
+        if not next(favs) then Print("No favorites left: bags are arranged as usual again.") end
         MarkDirty()
     elseif arg == "list" then
         local n = 0
@@ -1383,7 +1390,7 @@ local function FavCommand(arg, msg)
         Print(n == 0 and "no favorites (/aom fav snapshot or /aom fav add <item>)." or (n .. " favorite(s)."))
     elseif arg == "clear" then
         ArrangeOMaticCharDB.favs = {}
-        Print("favorites cleared: bags are arranged as usual again.")
+        Print("Favorites cleared: bags are arranged as usual again.")
         MarkDirty()
     else
         Print(FavCount() .. " favorite(s)  (use /aom fav snapshot|add|remove|list|clear)")
@@ -1442,10 +1449,10 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
         else
             local n = tonumber(arg)
             if not n or n < 1 or n > MAX_COLUMNS then
-                return Print("columns must be a number from 1 to " .. MAX_COLUMNS .. ".")
+                return Print("Columns must be a number from 1 to " .. MAX_COLUMNS .. ".")
             end
             ArrangeOMaticDB.columns = math.floor(n)
-            Print("columns set to " .. ArrangeOMaticDB.columns)
+            Print("Columns set to " .. ArrangeOMaticDB.columns)
             if GetUI() == "default" then
                 Print("(not used while ui is 'default': Blizzard's windows have a fixed width. /aom ui single to use it)")
             end
@@ -1463,10 +1470,10 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
     elseif cmd == "groups" or cmd == "group" then
         if arg == "type" or arg == "types" then
             ArrangeOMaticDB.subtypes = false
-            Print("grouping single items by broad type.")
+            Print("Grouping single items by broad type.")
         elseif arg == "subtype" or arg == "sub" or arg == "subtypes" then
             ArrangeOMaticDB.subtypes = true
-            Print("grouping single items by type and subtype.")
+            Print("Grouping single items by type and subtype.")
         else
             Print("groups = " .. (ArrangeOMaticDB.subtypes and "subtype" or "type")
                   .. "  (use /aom groups type|subtype)")
@@ -1512,23 +1519,23 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
         else
             local n = tonumber(arg)
             if not n or n < 1 or n > MAX_AUTO_DELAY then
-                return Print("delay must be a number of seconds from 1 to " .. MAX_AUTO_DELAY .. ".")
+                return Print("Delay must be a number of seconds from 1 to " .. MAX_AUTO_DELAY .. ".")
             end
             ArrangeOMaticDB.autoDelay = n
-            Print("delay set to " .. n .. "s: auto mode waits that long after you go idle.")
+            Print("Delay set to " .. n .. "s: auto mode waits that long after you go idle.")
             if not ArrangeOMaticDB.auto then Print("(auto is off - /aom auto on to use it)") end
         end
     elseif cmd == "stop" then
         if job then
-            Abort("cancelled.")
+            Abort("Cancelled by /aom stop.")
             autoDirty = false   -- don't let auto mode restart it straight away
         else
-            Print("nothing running.")
+            Print("Nothing running.")
         end
     elseif cmd == "help" or cmd == "h" or cmd == "?" then
         ShowHelp()
     else
-        Print("unknown command. /aom help explains every command; in short:")
+        Print("Unknown command. /aom help explains every command; in short:")
         Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom fav snapshot|add|remove|list|clear  |  /aom auto on|off  |  /aom delay <seconds>  |  /aom stop  |  /aom help")
     end
 end
