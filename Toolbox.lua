@@ -7,7 +7,8 @@ local Start, Abort, GetJob = ns.Start, ns.Abort, ns.GetJob
 local FavCount, FavCommand, FavDrop, CursorItem = ns.FavCount, ns.FavCommand, ns.FavDrop, ns.CursorItem
 local AUTO_DELAY = ns.AUTO_DELAY
 
-local TB_SIZE, TB_PAD, TB_GAP, TB_HEAD = 40, 6, 6, 20
+local TB_SIZE, TB_PAD, TB_GAP = 40, 6, 6
+local TB_GRIP = TB_SIZE / 3   -- extra space before a button marked gapBefore
 local TB_ICONS  = "Interface\\Icons\\"
 local STOP_ICON = "Interface\\Buttons\\UI-StopButton"
 local toolbox, tbMode, tbBits, tbButtons, tbMenu, tbMenuClosed
@@ -43,7 +44,7 @@ local TB_DEFS = {
     { arrange = true, id = "gbank", title = "Arrange guild bank tab", icon = TB_ICONS .. "INV_Misc_Coin_01", badge = TB_ICONS .. "INV_Shirt_GuildTabard_01",
       tip = "Arranges the guild bank tab you are looking at. You need permission to move items on it. Same as /aom gbank.",
       show = IsGuildBankOpen, click = function() Start("gbank") end },
-    { id = "favadd", title = "Add favorite", icon = TB_ICONS .. "INV_Misc_Book_09", badge = "Interface\\Buttons\\UI-PlusButton-Up",
+    { id = "favadd", gapBefore = true, title = "Add favorite", icon = TB_ICONS .. "INV_Misc_Book_09", badge = "Interface\\Buttons\\UI-PlusButton-Up",
       tip = "Drag an item from your bags onto this square to make it a favorite. While you have favorites, every other item is gathered at the far end of your bags.",
       extra = function() return FavCount() .. " favorite(s) now." end,
       drop = function() FavDrop(true) end },
@@ -89,7 +90,7 @@ end
 local function GetToolbox()
     if toolbox then return toolbox end
     local f = CreateFrame("Frame", "ArrangeOMaticToolbox", UIParent)
-    f:SetHeight(TB_SIZE + TB_PAD * 2 + TB_HEAD)
+    f:SetHeight(TB_SIZE + TB_PAD * 2)
     f:SetFrameStrata("HIGH")
     f:SetClampedToScreen(true)
     f:SetMovable(true)
@@ -103,10 +104,6 @@ local function GetToolbox()
         self:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", unpack(ArrangeOMaticDB.toolboxPos))
     end)
     f:Hide()
-
-    f.header = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    f.header:SetPoint("TOP", 0, -TB_PAD)
-    f.header:SetText("Arrange-o-Matic: Toolbox")
 
     tbButtons = {}
     for _, d in ipairs(TB_DEFS) do
@@ -154,7 +151,6 @@ local function GetToolbox()
         tbButtons[d.id] = b
     end
     TbSkin(f, tbButtons)
-    if f.header.FontTemplate then f.header:FontTemplate(nil, 14) end
     toolbox = f
     return f
 end
@@ -183,23 +179,39 @@ local function UpdateToolbox()
     for i, d in ipairs(TB_DEFS) do
         if d.show == nil or d.show() then bits = bits + 2 ^ (i - 1) end
     end
+    local vertical = ArrangeOMaticDB.toolboxVertical == true
+    if vertical then bits = bits + 2 ^ #TB_DEFS end
     if mode == tbMode and bits == tbBits then return end
     tbMode, tbBits = mode, bits
 
-    -- Visible buttons, centered under the header.
+    -- Visible buttons in one row or column.
     local shown = {}
     for _, d in ipairs(TB_DEFS) do
         if d.show == nil or d.show() then shown[#shown + 1] = d else tbButtons[d.id]:Hide() end
     end
     local total = #shown * (TB_SIZE + TB_GAP) - TB_GAP
-    local width = math.max(total, f.header:GetStringWidth()) + TB_PAD * 2
-    f:SetWidth(width)
-    local x = (width - total) / 2
+    local x, y = TB_PAD, TB_PAD
+    for _, d in ipairs(shown) do if d.gapBefore then total = total + TB_GRIP end end
+    if vertical then
+        f:SetWidth(TB_SIZE + TB_PAD * 2)
+        f:SetHeight(total + TB_PAD * 2)
+    else
+        f:SetWidth(total + TB_PAD * 2)
+        f:SetHeight(TB_SIZE + TB_PAD * 2)
+    end
     for _, d in ipairs(shown) do
         local b = tbButtons[d.id]
         b:ClearAllPoints()
-        b:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", x, TB_PAD)
-        x = x + TB_SIZE + TB_GAP
+        if d.gapBefore then
+            if vertical then y = y + TB_GRIP else x = x + TB_GRIP end
+        end
+        if vertical then
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", x, -y)
+            y = y + TB_SIZE + TB_GAP
+        else
+            b:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", x, TB_PAD)
+            x = x + TB_SIZE + TB_GAP
+        end
         -- The running arrange button becomes Stop; the other arrange buttons grey out.
         local stopping = TbStopping(d)
         local dim = d.arrange and job ~= nil and not stopping
@@ -263,6 +275,7 @@ local function MenuInit(self, level)
         sub("Columns: " .. GetColumns(), "columns", "Width of the combined grid. Only used with the single layout.")
         sub("Group by: " .. (db.subtypes and "subtype" or "type"), "groups", "How single items are grouped: broad type only, or type and subtype.")
         sub("Favorites (" .. FavCount() .. ")", "favs", "Favorites are kept together; everything else is gathered at the far end of your bags.")
+        check("Vertical toolbox", "toolboxVertical", false, "Stack the toolbox buttons in a column instead of a row.")
         return
     end
 
