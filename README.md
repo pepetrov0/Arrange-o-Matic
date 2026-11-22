@@ -7,7 +7,7 @@
 *Packs and clusters your bag items into tidy grid blocks — bags, bank and guild bank, laid out the way your bag windows actually look.*
 
 ![World of Warcraft WotLK 3.3.5a](https://img.shields.io/static/v1?style=flat-square&label=WoW&message=WotLK%203.3.5a&color=a335ee)
-![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.12.0&color=2ea043)
+![Addon version](https://img.shields.io/static/v1?style=flat-square&label=addon&message=v1.13.0&color=2ea043)
 ![Lua 5.1](https://img.shields.io/static/v1?style=flat-square&label=Lua&message=5.1&color=000080)
 
 ⭐ If you find this addon useful, star it on GitHub — it helps others discover it!
@@ -79,7 +79,7 @@ Type in any chat input:
 | `/aom toolbox on\|off\|reset` | Show a small draggable toolbox while your bags, bank or guild bank are open (default on); `reset` restores its default position |
 | `/aom stop` | Cancel an arrangement in progress |
 
-**Toolbox:** whenever your bags, bank or guild bank are open, a small bar of icon buttons appears: arrange bags, bank and guild bank (the last two only while that window is open; while a run is in progress its button turns into a stop button), and pack, junk and auto toggles (greyed out = off). Hover any icon for an explanation. Drag it to move it; the position is saved. It is skinned to match ElvUI when it is loaded.
+**Toolbox:** whenever your bags, bank or guild bank are open, a small bar of icon buttons appears: arrange bags, bank and guild bank (the last two only while that window is open; while a run is in progress its button turns into a stop button), two favorites squares, and a settings gear. Hover any icon for an explanation. Drag an item from your bags onto the green square to make it a favorite, or onto the red one to remove it. The gear opens a dropdown with every setting (pack, junk, auto and its delay, bag layout, columns, grouping, favorites). Drag the bar to move it; the position is saved. It is skinned to match ElvUI when it is loaded.
 
 While sorting, nothing is printed to chat: a small click-through dialog centered horizontally at two-thirds of the screen height shows **Arrange-o-Matic: Sorting** with a progress bar (skinned to match ElvUI when it is loaded). When the run ends, the dialog shows the final report for a few seconds and fades out, e.g. (with the default `ui` setting):
 
