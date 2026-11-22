@@ -2,8 +2,16 @@
 ## Title: Arrange-o-Matic
 ## Author: Petar Petrov
 ## Notes: Packs and clusters your bag items on an N-column grid, anchored at the last slot. Use /arrangeomatic.
-## Version: 1.13.1
+## Version: 1.13.2
 ## SavedVariables: ArrangeOMaticDB
 ## SavedVariablesPerCharacter: ArrangeOMaticCharDB
 
-ArrangeOMatic.lua
+Core.lua
+Scan.lua
+Planner.lua
+Auto.lua
+Executor.lua
+Favorites.lua
+Toolbox.lua
+Slash.lua
+Events.lua

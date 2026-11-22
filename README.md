@@ -48,7 +48,7 @@ World of Warcraft/
     └── AddOns/
         └── ArrangeOMatic/
             ├── ArrangeOMatic.toc
-            └── ArrangeOMatic.lua
+            └── *.lua   (Core, Scan, Planner, Auto, Executor, Favorites, Toolbox, Slash, Events)
 ```
 
 Then restart the client (or use `/reload` while in game). Settings are stored per account in `WTF/Account/<your account>/SavedVariables/ArrangeOMatic.lua`.
