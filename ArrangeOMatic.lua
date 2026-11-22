@@ -1140,6 +1140,77 @@ local function Step(self, elapsed)
     end
 end
 
+-- Bags and bank: no per-step throttle, and moves that touch disjoint slots are
+-- issued together (several in flight at once). A move only starts when neither
+-- of its slots is part of an unfinished earlier move, so the result is the same
+-- as running them one by one. The swap's third click (dropping the displaced
+-- item back) is done in the same frame.
+local MAX_FLIGHT, LOOKAHEAD = 10, 24
+
+local function StepFast(self, elapsed)
+    if UnitIsDeadOrGhost("player") then return Abort("You died.") end
+    if job.check then
+        local problem = job.check()
+        if problem then return Abort(problem) end
+    end
+    if GetCursorInfo() then return Abort("You picked something up with the mouse.") end
+
+    local api, slots, moves = job.api, job.slots, job.moves
+    local now = GetTime()
+
+    -- Retire finished moves.
+    local flight, busy, i = job.flight, job.busy, 1
+    while i <= #flight do
+        local f = flight[i]
+        local m = moves[f.n]
+        local A, B = slots[m.a], slots[m.b]
+        if not IsLocked(api, A) and not IsLocked(api, B)
+           and SigAt(api, A) == m.postA and SigAt(api, B) == m.postB then
+            busy[m.a], busy[m.b] = nil, nil
+            table.remove(flight, i)
+            job.done = job.done + 1
+            job.idx = job.done + 1
+            DialogProgress(job.done, #moves)
+        else
+            if now - f.t > TIMEOUT then
+                return Abort("The server did not confirm a move (lag or missing permission). Run it again.")
+            end
+            i = i + 1
+        end
+    end
+
+    if job.done >= #moves then return Finish(job.title, job.report) end
+
+    -- Issue every move that is independent of what is still in flight.
+    local pending, held, seen = job.pending, {}, 0
+    local k = 1
+    while k <= #pending and #flight < MAX_FLIGHT and seen < LOOKAHEAD do
+        local n = pending[k]
+        local m = moves[n]
+        seen = seen + 1
+        if busy[m.a] or busy[m.b] or held[m.a] or held[m.b] then
+            held[m.a], held[m.b] = true, true
+            k = k + 1
+        else
+            local A, B = slots[m.a], slots[m.b]
+            if IsLocked(api, A) or IsLocked(api, B) then
+                held[m.a], held[m.b] = true, true
+                k = k + 1
+            else
+                if SigAt(api, A) ~= m.preA or SigAt(api, B) ~= m.preB then
+                    return Abort("Your items changed while sorting (something was looted, used or moved). Run it again.")
+                end
+                api.pickup(A)
+                api.pickup(B)
+                if CursorHasItem() then api.pickup(A) end   -- put the displaced item back
+                busy[m.a], busy[m.b] = true, true
+                flight[#flight + 1] = { n = n, t = now }
+                table.remove(pending, k)
+            end
+        end
+    end
+end
+
 -- mode: "bags" (default), "bank" or "gbank"
 -- auto: started by auto mode - stop if the player gets busy, and say nothing
 -- if there is nothing to do (the bags change all the time).
@@ -1241,9 +1312,13 @@ local function Start(mode, auto)
     report = report .. note
     job = { api = api, slots = slots, moves = moves, check = check, auto = auto, title = title, report = report,
             idx = 1, phase = "issue", acc = 0, waited = 0 }
+    if mode ~= "gbank" then
+        job.done, job.flight, job.busy, job.pending = 0, {}, {}, {}
+        for n = 1, #moves do job.pending[n] = n end
+    end
     DialogStart(#moves)
     DialogProgress(0, #moves)
-    frame:SetScript("OnUpdate", Step)
+    frame:SetScript("OnUpdate", mode == "gbank" and Step or StepFast)
 end
 
 ---------------------------------------------------------------------------
