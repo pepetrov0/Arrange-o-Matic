@@ -19,6 +19,7 @@ ArrangeOMatic - WotLK 3.3.5a
   /aom fav list|clear   show / remove all favorites
   /aom auto on|off      arrange your bags by itself when you are idle (default off)
   /aom delay <seconds>  how long you must be idle before auto mode arranges (default 5)
+  /aom toolbox on|off|reset   button bar shown while bags/bank/gbank are open (default on)
   /aom stop             cancel a running arrangement
   (long form: /arrangeomatic)
 
@@ -1310,7 +1311,7 @@ local function Start(mode, auto)
     if nMerges > 0 then report = report .. string.format("\n%d partial stacks combined.", nMerges) end
     if nSoul > 0 then report = report .. string.format("\n%d soul shards moved to soul bags.", nSoul) end
     report = report .. note
-    job = { api = api, slots = slots, moves = moves, check = check, auto = auto, title = title, report = report,
+    job = { mode = mode, api = api, slots = slots, moves = moves, check = check, auto = auto, title = title, report = report,
             idx = 1, phase = "issue", acc = 0, waited = 0 }
     if mode ~= "gbank" then
         job.done, job.flight, job.busy, job.pending = 0, {}, {}, {}
@@ -1366,6 +1367,7 @@ frame:SetScript("OnEvent", function(self, event, name)
             if ArrangeOMaticDB.trash == nil then ArrangeOMaticDB.trash = true end
             if ArrangeOMaticDB.ui ~= "single" then ArrangeOMaticDB.ui = "default" end
             ArrangeOMaticDB.auto = ArrangeOMaticDB.auto and true or false
+            if ArrangeOMaticDB.toolbox == nil then ArrangeOMaticDB.toolbox = true end
             ArrangeOMaticDB.autoDelay = tonumber(ArrangeOMaticDB.autoDelay) or AUTO_DELAY
             ArrangeOMaticCharDB = ArrangeOMaticCharDB or {}
             if type(ArrangeOMaticCharDB.favs) ~= "table" then ArrangeOMaticCharDB.favs = {} end
@@ -1381,6 +1383,208 @@ frame:SetScript("OnEvent", function(self, event, name)
     elseif event == "GUILDBANKFRAME_OPENED" then gbankOpen = true
     elseif event == "GUILDBANKFRAME_CLOSED" then gbankOpen = false
     end
+end)
+
+---------------------------------------------------------------------------
+-- Toolbox: a small movable bar of icon buttons, shown while your bags, bank
+-- or guild bank are open. Skinned to match ElvUI if loaded.
+---------------------------------------------------------------------------
+local TB_SIZE, TB_PAD, TB_GAP, TB_HEAD = 40, 6, 6, 20
+local TB_ICONS = "Interface\\Icons\\"
+local toolbox, tbSig, tbButtons
+
+local function TbToggle(key, default)
+    local v = ArrangeOMaticDB[key]
+    if v == nil then v = default end
+    return v ~= false
+end
+
+local function TbFlip(key, default)
+    ArrangeOMaticDB[key] = not TbToggle(key, default)
+    if key == "auto" and ArrangeOMaticDB.auto then MarkDirty() end
+end
+
+local STOP_ICON = "Interface\\Buttons\\UI-StopButton"
+-- Is this the arrange button whose run is in progress? It turns into a stop button.
+local function TbStopping(d) return job ~= nil and d.arrange and job.mode == d.id end
+
+-- Buttons in display order. show: when visible; on: toggle state (nil = plain button).
+local TB_DEFS = {
+    { arrange = true, id = "bags",  title = "Arrange bags", icon = TB_ICONS .. "INV_Misc_Bag_08",
+      tip = "Packs your backpack and bags into tidy, square blocks, grouped by category. Same as /aom.",
+      show = function() return true end, click = function() Start("bags") end },
+    { arrange = true, id = "bank",  title = "Arrange bank", icon = TB_ICONS .. "INV_Box_01",
+      tip = "Arranges the main bank slots and your bank bags. Same as /aom bank.",
+      show = IsBankOpen, click = function() Start("bank") end },
+    { arrange = true, id = "gbank", title = "Arrange guild bank tab", icon = TB_ICONS .. "INV_Shirt_GuildTabard_01",
+      tip = "Arranges the guild bank tab you are looking at. You need permission to move items on it. Same as /aom gbank.",
+      show = IsGuildBankOpen, click = function() Start("gbank") end },
+    { id = "pack",  title = "Pack stacks", icon = TB_ICONS .. "INV_Misc_Coin_01",
+      tip = "Before arranging, combine partial stacks of the same item. Same as /aom pack.",
+      on = function() return TbToggle("pack", true) end, click = function() TbFlip("pack", true) end },
+    { id = "trash", title = "Gather junk", icon = TB_ICONS .. "INV_Misc_Bone_HumanSkull_01",
+      tip = "Bags only: put grey items in one run at the far end, easy to find at a vendor. Same as /aom trash.",
+      on = function() return TbToggle("trash", true) end, click = function() TbFlip("trash", true) end },
+    { id = "auto",  title = "Auto-arrange", icon = TB_ICONS .. "INV_Misc_Gear_01",
+      tip = "Arrange your bags by themselves once they change and you are idle. Same as /aom auto.",
+      on = function() return ArrangeOMaticDB.auto and true or false end,
+      click = function() TbFlip("auto", false) end },
+}
+
+local function TbSkin(f, buttons)
+    local E = ElvUI and unpack(ElvUI)
+    if not (E and f.SetTemplate) then
+        f:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 14,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        f:SetBackdropColor(0, 0, 0, 0.8)
+        f:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+        for _, b in pairs(buttons) do
+            b:SetBackdrop({ edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10,
+                            insets = { left = 2, right = 2, top = 2, bottom = 2 } })
+            b:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+            b.icon:SetPoint("TOPLEFT", 3, -3)
+            b.icon:SetPoint("BOTTOMRIGHT", -3, 3)
+            b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        end
+        return
+    end
+    f:SetTemplate("Transparent")
+    for _, b in pairs(buttons) do
+        b:SetTemplate("Default", true)
+        if b.StyleButton then b:StyleButton() end
+        b.icon:SetPoint("TOPLEFT", 2, -2)
+        b.icon:SetPoint("BOTTOMRIGHT", -2, 2)
+    end
+end
+
+local function GetToolbox()
+    if toolbox then return toolbox end
+    local f = CreateFrame("Frame", "ArrangeOMaticToolbox", UIParent)
+    f:SetHeight(TB_SIZE + TB_PAD * 2 + TB_HEAD)
+    f:SetFrameStrata("HIGH")
+    f:SetClampedToScreen(true)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        ArrangeOMaticDB.toolboxPos = { self:GetLeft(), self:GetBottom() }
+        self:ClearAllPoints()
+        self:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", unpack(ArrangeOMaticDB.toolboxPos))
+    end)
+    f:Hide()
+
+    f.header = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.header:SetPoint("TOP", 0, -TB_PAD)
+    f.header:SetText("Arrange-o-Matic: Toolbox")
+
+    tbButtons = {}
+    for _, d in ipairs(TB_DEFS) do
+        local b = CreateFrame("Button", nil, f)
+        b:SetWidth(TB_SIZE)
+        b:SetHeight(TB_SIZE)
+        b.icon = b:CreateTexture(nil, "ARTWORK")
+        b.icon:SetTexture(d.icon)
+        b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        b:SetScript("OnClick", function(self)
+            if TbStopping(d) then Abort("Cancelled."); autoDirty = false else d.click() end
+            tbSig = nil
+            -- Refresh the tooltip so it shows the new on/off state.
+            if GameTooltip:IsOwned(self) then self:GetScript("OnEnter")(self) end
+        end)
+        b:SetScript("OnMouseDown", function(self) if self:IsEnabled() == 1 then self.icon:SetAlpha(0.7) end end)
+        b:SetScript("OnMouseUp", function(self) self.icon:SetAlpha(1) end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            if TbStopping(d) then
+                GameTooltip:SetText("Stop", 1, 1, 1)
+                GameTooltip:AddLine("Cancels the arrangement in progress. Items already moved stay where they are. Same as /aom stop.", nil, nil, nil, true)
+                GameTooltip:Show()
+                return
+            end
+            GameTooltip:SetText(d.title, 1, 1, 1)
+            GameTooltip:AddLine(d.tip, nil, nil, nil, true)
+            if d.on then
+                local on = d.on()
+                GameTooltip:AddLine("Currently " .. (on and "|cff55ff55on|r" or "|cff999999off|r")
+                                    .. ". Click to turn " .. (on and "off" or "on") .. ".", 1, 0.82, 0, true)
+            end
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        tbButtons[d.id] = b
+    end
+    TbSkin(f, tbButtons)
+    if f.header.FontTemplate then f.header:FontTemplate(nil, 14) end
+    toolbox = f
+    return f
+end
+
+-- Show/hide and re-lay out only when something visible actually changed.
+local function UpdateToolbox()
+    local want = ArrangeOMaticDB and ArrangeOMaticDB.toolbox ~= false
+        and (BagsOpen() or IsBankOpen() or IsGuildBankOpen())
+    if not want then
+        if toolbox and toolbox:IsShown() then toolbox:Hide() end
+        return
+    end
+    local f = GetToolbox()
+    if not f:IsShown() then
+        f:ClearAllPoints()
+        local pos = ArrangeOMaticDB.toolboxPos
+        if pos then f:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", pos[1], pos[2])
+        else f:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 220) end
+        f:Show()
+        tbSig = nil
+    end
+    local parts = { job and ("r" .. tostring(job.mode)) or "i" }
+    for _, d in ipairs(TB_DEFS) do
+        parts[#parts + 1] = (d.show == nil or d.show()) and (d.on and (d.on() and "1" or "0") or "1") or "x"
+    end
+    local sig = table.concat(parts)
+    if sig == tbSig then return end
+    tbSig = sig
+
+    -- Visible buttons, centered under the header.
+    local shown = {}
+    for _, d in ipairs(TB_DEFS) do
+        if d.show == nil or d.show() then shown[#shown + 1] = d else tbButtons[d.id]:Hide() end
+    end
+    local total = #shown * (TB_SIZE + TB_GAP) - TB_GAP
+    local width = math.max(total, f.header:GetStringWidth()) + TB_PAD * 2
+    f:SetWidth(width)
+    local x = (width - total) / 2
+    for _, d in ipairs(shown) do
+        local b = tbButtons[d.id]
+        b:ClearAllPoints()
+        b:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", x, TB_PAD)
+        x = x + TB_SIZE + TB_GAP
+        -- The running arrange button becomes Stop; other arrange buttons and
+        -- off toggles look grey.
+        local stopping = TbStopping(d)
+        local dim = (d.on and not d.on()) or (d.arrange and job ~= nil and not stopping)
+        local c = dim and 0.6 or 1
+        b.icon:SetTexture(stopping and STOP_ICON or d.icon)
+        b.icon:SetDesaturated(dim and true or false)
+        b.icon:SetVertexColor(c, c, c)
+        if d.arrange then
+            if job and not stopping then b:Disable() else b:Enable() end
+        end
+        b:Show()
+    end
+end
+
+local tbDriver, tbAcc = CreateFrame("Frame"), 0
+tbDriver:SetScript("OnUpdate", function(_, elapsed)
+    tbAcc = tbAcc + elapsed
+    if tbAcc < 0.2 then return end
+    tbAcc = 0
+    UpdateToolbox()
 end)
 
 -- Favorites (per character)
@@ -1507,6 +1711,7 @@ local function ShowHelp()
     cmd("/aom fav add|remove <item>", "add or remove favorites: shift-click items into the command, or type item IDs. Several at once is fine.")
     cmd("/aom fav list|clear", "show your favorites, or remove them all (bags are then arranged as usual).")
     cmd("/aom auto on|off", "arrange your bags by themselves after they change, once you are idle: alive, out of combat, not looting or casting, nothing on the cursor, your bags closed, and no vendor, bank, mail, trade, auction, NPC, quest, character, crafting or socketing window open. Once a run has started, combat, casting and opening your bags no longer stop it; dying, picking up an item or opening a vendor, bank, mail, trade, loot or similar window does, and it tries again later." .. now(onoff(db.auto)))
+    cmd("/aom toolbox on|off|reset", "a small draggable button bar (arrange bags / bank / guild bank, stop, pack, junk and auto toggles) shown while your bags or a bank are open. reset puts it back at the default spot." .. now(onoff(db.toolbox ~= false)))
     cmd("/aom delay <seconds>", "how long you must be idle before auto mode arranges, 1-" .. MAX_AUTO_DELAY .. "." .. now((db.autoDelay or AUTO_DELAY) .. "s"))
     line("  Long form: /arrangeomatic.")
 end
@@ -1600,6 +1805,20 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
             Print("Delay set to " .. n .. "s: auto mode waits that long after you go idle.")
             if not ArrangeOMaticDB.auto then Print("(auto is off - /aom auto on to use it)") end
         end
+    elseif cmd == "toolbox" or cmd == "tb" then
+        if arg == "on" or arg == "1" or arg == "yes" then
+            ArrangeOMaticDB.toolbox = true
+            Print("toolbox = on: a button bar appears while your bags or a bank are open (drag it to move).")
+        elseif arg == "off" or arg == "0" or arg == "no" then
+            ArrangeOMaticDB.toolbox = false
+            Print("toolbox = off.")
+        elseif arg == "reset" then
+            ArrangeOMaticDB.toolboxPos = nil
+            if toolbox then toolbox:Hide() end
+            Print("Toolbox position reset.")
+        else
+            Print("toolbox = " .. (ArrangeOMaticDB.toolbox and "on" or "off") .. "  (use /aom toolbox on|off|reset)")
+        end
     elseif cmd == "stop" then
         if job then
             Abort("Cancelled by /aom stop.")
@@ -1611,6 +1830,6 @@ SlashCmdList["ARRANGEOMATIC"] = function(msg)
         ShowHelp()
     else
         Print("Unknown command. /aom help explains every command; in short:")
-        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom fav snapshot|add|remove|list|clear  |  /aom auto on|off  |  /aom delay <seconds>  |  /aom stop  |  /aom help")
+        Print("/aom  |  /aom bank  |  /aom gbank  |  /aom ui single|default  |  /aom columns <n>  |  /aom groups type|subtype  |  /aom pack on|off  |  /aom trash on|off  |  /aom fav snapshot|add|remove|list|clear  |  /aom auto on|off  |  /aom delay <seconds>  |  /aom toolbox on|off|reset  |  /aom stop  |  /aom help")
     end
 end
