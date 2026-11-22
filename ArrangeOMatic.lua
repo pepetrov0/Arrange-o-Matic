@@ -1533,10 +1533,10 @@ local TB_DEFS = {
     { arrange = true, id = "bags",  title = "Arrange bags", icon = TB_ICONS .. "INV_Misc_Bag_08",
       tip = "Packs your backpack and bags into tidy, square blocks, grouped by category. Same as /aom.",
       show = function() return true end, click = function() Start("bags") end },
-    { arrange = true, id = "bank",  title = "Arrange bank", icon = TB_ICONS .. "INV_Box_01",
+    { arrange = true, id = "bank",  title = "Arrange bank", icon = TB_ICONS .. "INV_Misc_Coin_01",
       tip = "Arranges the main bank slots and your bank bags. Same as /aom bank.",
       show = IsBankOpen, click = function() Start("bank") end },
-    { arrange = true, id = "gbank", title = "Arrange guild bank tab", icon = TB_ICONS .. "INV_Shirt_GuildTabard_01",
+    { arrange = true, id = "gbank", title = "Arrange guild bank tab", icon = TB_ICONS .. "INV_Misc_Coin_01", badge = TB_ICONS .. "INV_Shirt_GuildTabard_01",
       tip = "Arranges the guild bank tab you are looking at. You need permission to move items on it. Same as /aom gbank.",
       show = IsGuildBankOpen, click = function() Start("gbank") end },
     { id = "favadd", title = "Add favorite", icon = "Interface\\RaidFrame\\ReadyCheck-Ready",
@@ -1612,6 +1612,14 @@ local function GetToolbox()
         b.icon = b:CreateTexture(nil, "ARTWORK")
         b.icon:SetTexture(d.icon)
         b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        if d.badge then   -- small corner emblem, e.g. the guild tabard on the guild bank
+            b.badge = b:CreateTexture(nil, "OVERLAY")
+            b.badge:SetTexture(d.badge)
+            b.badge:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            b.badge:SetWidth(18)
+            b.badge:SetHeight(18)
+            b.badge:SetPoint("BOTTOMRIGHT", -2, 2)
+        end
         -- An item dropped on a favorites square arrives as a drag-release or as a click.
         local function receive(self)
             if d.drop and CursorItem() then d.drop() end
@@ -1693,6 +1701,11 @@ local function UpdateToolbox()
         b.icon:SetTexture(stopping and STOP_ICON or d.icon)
         b.icon:SetDesaturated(dim and true or false)
         b.icon:SetVertexColor(c, c, c)
+        if b.badge then
+            b.badge:SetDesaturated(dim and true or false)
+            b.badge:SetVertexColor(c, c, c)
+            if stopping then b.badge:Hide() else b.badge:Show() end
+        end
         if d.arrange then
             if dim then b:Disable() else b:Enable() end
         end
